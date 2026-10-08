@@ -10,7 +10,24 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - `crates/stereo-bt-wasapi` — thin adapter over the `wasapi` crate (no own `unsafe`):
   `ComGuard`, `list_output_devices`, `LoopbackCapture`, `RenderStream`, `DeviceWatcher`.
   All streams 48 kHz f32 stereo, shared mode with Windows autoconvert.
-- Planned: `crates/stereo-bt-engine`, `app` (Slint `fluent-dark`).
+- `crates/stereo-bt-engine` — `Session`: one capture thread → `FanOut` (one `rtrb` SPSC
+  queue per output) → one render thread per output running `RenderPipeline`
+  (`Playout` policy + `OutputChain`). Platform behind `Backend` trait; `WasapiBackend`
+  on Windows, fake backend in `tests/session.rs`. Live settings via lock-free atomics
+  (`OutputControls`). Manual hardware check: `cargo run -p stereo-bt-engine --example route`.
+- Planned: supervisor (hot-plug restart, default-device mute, MMCSS), `app` (Slint
+  `fluent-dark`).
+
+## Sync model
+
+- Every output keeps its queue at the same cushion (40 ms, `tuning.rs`); priming aligns to
+  exactly the cushion, so base latency is equal for all outputs. The user delay is a
+  separate `DelayLine` on top.
+- Drift: trim back to cushion beyond +30 ms; re-prime on underrun. Resampling (rubato)
+  is a later refinement.
+- Never render to the loopback source (default device): feedback loop.
+- WASAPI loopback is captured **before** endpoint volume/mute (verified on hardware
+  2026-10-08), so muting the default endpoint keeps the source audio.
 
 ## WASAPI notes
 

@@ -14,6 +14,7 @@ mod error;
 mod frame;
 mod output_chain;
 pub mod pcm;
+mod playout;
 mod sample_rate;
 mod volume;
 
@@ -26,5 +27,6 @@ pub use device_info::DeviceInfo;
 pub use error::Error;
 pub use frame::Frame;
 pub use output_chain::OutputChain;
+pub use playout::{Playout, PlayoutPlan};
 pub use sample_rate::SampleRate;
 pub use volume::Volume;

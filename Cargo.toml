@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["crates/stereo-bt-core", "crates/stereo-bt-wasapi"]
+members = [
+    "crates/stereo-bt-core",
+    "crates/stereo-bt-engine",
+    "crates/stereo-bt-wasapi",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +16,8 @@ publish = false
 
 [workspace.dependencies]
 stereo-bt-core = { path = "crates/stereo-bt-core" }
+stereo-bt-wasapi = { path = "crates/stereo-bt-wasapi" }
+rtrb = "0.4"
 thiserror = "2"
 wasapi = "0.25"
 proptest = "1"

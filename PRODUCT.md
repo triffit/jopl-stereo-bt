@@ -32,7 +32,7 @@ and do not compensate for the different latency of each Bluetooth device.
 | F6 | Hot-plug | Device removal does not stop others; reconnect resumes automatically. |
 | F7 | Tray mode | Keeps streaming when the window is closed; tray menu for start/stop/quit. |
 | F8 | Profiles | Remember device set, channel mode, delay and volume per device ID. |
-| F9 | Clock-drift correction | Adaptive resampling per output so devices do not drift apart over long sessions (WaveSync does not do this). |
+| F9 | Clock-drift correction | Equal per-output queue cushion, trimmed when drift exceeds 30 ms (done); adaptive resampling per output for click-free correction (next). WaveSync has neither. |
 
 ## Later (v2+)
 
@@ -72,6 +72,9 @@ WASAPI loopback (default render endpoint, 48 kHz f32 stereo)
   set"** (default **off**): off = default device is muted while streaming and only the
   selected devices play; on = default device plays undelayed and is a member of the set
   (other devices are delayed relative to it).
+  Off is the better sync mode: every audible device is rendered by us, so any device can be
+  delayed relative to any other. Loopback captures before endpoint mute (verified), so muting
+  keeps the source. The previous mute state is restored on stop and after a crash.
 - **Device events:** `IMMNotificationClient` → event channel → engine supervisor restarts
   only the affected pipeline.
 

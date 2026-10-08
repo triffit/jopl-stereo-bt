@@ -231,6 +231,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "rtrb"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9278fb35b3e730abe136e9b395b5b81b96d06b9f5478a50f0c8430a2237b22de"
+
+[[package]]
 name = "rustix"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -261,6 +267,15 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "thiserror",
+]
+
+[[package]]
+name = "stereo-bt-engine"
+version = "0.1.0"
+dependencies = [
+ "rtrb",
+ "stereo-bt-core",
+ "stereo-bt-wasapi",
 ]
 
 [[package]]
