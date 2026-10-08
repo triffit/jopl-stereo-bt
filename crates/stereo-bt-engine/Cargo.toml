@@ -1,6 +1,6 @@
 [package]
 name = "stereo-bt-engine"
-description = "Audio routing engine for StereoBT: capture fan-out and per-device render threads."
+description = "Audio routing engine for JOPL-StereoBT: capture fan-out and per-device render threads."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

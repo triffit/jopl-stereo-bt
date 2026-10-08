@@ -1,6 +1,6 @@
 [package]
 name = "stereo-bt-core"
-description = "Platform-independent audio DSP and configuration model for StereoBT."
+description = "Platform-independent audio DSP and configuration model for JOPL-StereoBT."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,4 +1,4 @@
-//! `StereoBT`: play system audio on several devices at once, in sync.
+//! `JOPL-StereoBT`: play system audio on several devices at once, in sync.
 //!
 //! Binary edge: wires the engine, settings store and window together.
 //! All logic lives in `controller` and the engine crates.
@@ -7,8 +7,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod controller;
+#[cfg(windows)]
+mod icon;
 mod settings;
 mod settings_store;
+#[cfg(windows)]
+mod tray;
+#[cfg(windows)]
 mod ui;
 mod view_model;
 
@@ -20,7 +25,7 @@ fn main() -> anyhow::Result<()> {
     use crate::settings_store::FileSettingsStore;
 
     let data_dir = std::env::var_os("APPDATA")
-        .map(|dir| std::path::PathBuf::from(dir).join("StereoBT"))
+        .map(|dir| std::path::PathBuf::from(dir).join("JOPL-StereoBT"))
         .context("the APPDATA environment variable is not set")?;
 
     match Engine::spawn(FileMuteJournal::new(data_dir.join("mute-journal.txt"))) {
@@ -39,5 +44,5 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(not(windows))]
 fn main() -> anyhow::Result<()> {
-    anyhow::bail!("StereoBT runs on Windows only")
+    anyhow::bail!("JOPL-StereoBT runs on Windows only")
 }

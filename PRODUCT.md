@@ -1,4 +1,4 @@
-# PRODUCT.md — jopl-stereo-bt (working name: StereoBT)
+# PRODUCT.md — JOPL-StereoBT
 
 ## Pitch
 

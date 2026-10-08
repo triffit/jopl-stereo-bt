@@ -1,4 +1,4 @@
-//! Audio routing engine for `StereoBT`.
+//! Audio routing engine for `JOPL-StereoBT`.
 //!
 //! A [`Session`] runs one capture thread that fans every captured block out
 //! to a lock-free queue per output, and one render thread per output device

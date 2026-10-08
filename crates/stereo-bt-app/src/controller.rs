@@ -9,7 +9,7 @@ use stereo_bt_engine::{Engine, EngineConfig, EngineStatus};
 
 use crate::settings::{DeviceSettings, Settings};
 use crate::settings_store::SettingsStore;
-use crate::view_model::{self, DeviceRow};
+use crate::view_model::{self, DeviceRow, StatusKind};
 
 /// Settings are written this long after the last change, so dragging a
 /// slider does not write the file on every step.
@@ -53,6 +53,7 @@ pub(crate) struct View {
     pub(crate) include_default: bool,
     pub(crate) rows: Vec<DeviceRow>,
     pub(crate) status_line: String,
+    pub(crate) status_kind: StatusKind,
     pub(crate) error: Option<String>,
 }
 
@@ -112,13 +113,28 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         self.status = self.engine.status();
     }
 
+    pub(crate) fn is_running(&self) -> bool {
+        self.running
+    }
+
     pub(crate) fn set_include_default(&mut self, include: bool) {
         self.settings.include_default = include;
         self.changed();
     }
 
+    /// Checks or unchecks a device. For the default (source) device this
+    /// chooses between playing natively and muting it while streaming.
     pub(crate) fn set_enabled(&mut self, id: &DeviceId, enabled: bool) {
-        self.edit(id, |d| d.enabled = enabled);
+        let is_source = self
+            .status
+            .devices
+            .iter()
+            .any(|d| d.is_default && &d.id == id);
+        if is_source {
+            self.set_include_default(enabled);
+        } else {
+            self.edit(id, |d| d.enabled = enabled);
+        }
     }
 
     pub(crate) fn set_channel_mode(&mut self, id: &DeviceId, mode: ChannelMode) {
@@ -130,14 +146,6 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         let clamped = u16::try_from(millis.clamp(0, i64::from(Delay::MAX_MILLIS))).unwrap_or(0);
         let delay = Delay::from_millis(clamped).unwrap_or(Delay::ZERO);
         self.edit(id, |d| d.delay = delay);
-    }
-
-    /// Changes the delay by `step` milliseconds (fine ±1 ms nudge).
-    pub(crate) fn nudge_delay(&mut self, id: &DeviceId, step: i64) {
-        if let Some(device) = self.settings.device(id) {
-            let current = i64::from(device.delay.as_millis());
-            self.set_delay(id, current + step);
-        }
     }
 
     /// Sets the volume, clamped to 0..=100 % (F4).
@@ -182,6 +190,7 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
             include_default: self.settings.include_default,
             rows: view_model::device_rows(&self.settings, &self.status),
             status_line: view_model::status_line(&self.settings, &self.status),
+            status_kind: view_model::status_kind(&self.status),
             error: self.error.clone().or_else(|| self.engine.last_error()),
         }
     }
@@ -339,17 +348,25 @@ mod tests {
     }
 
     #[test]
-    fn f3_delay_is_clamped_and_nudged_in_one_ms_steps() {
+    fn f3_delay_is_clamped_to_the_supported_range() {
         let (mut c, _, _) = controller();
 
         c.set_delay(&id("B"), 9_999);
         assert_eq!(c.view().rows[1].delay_ms, 500);
-        c.nudge_delay(&id("B"), 1);
-        assert_eq!(c.view().rows[1].delay_ms, 500);
-        c.nudge_delay(&id("B"), -1);
+        c.set_delay(&id("B"), 499);
         assert_eq!(c.view().rows[1].delay_ms, 499);
         c.set_delay(&id("B"), -5);
         assert_eq!(c.view().rows[1].delay_ms, 0);
+    }
+
+    #[test]
+    fn checking_the_source_device_keeps_it_playing_natively() {
+        let (mut c, _, _) = controller();
+
+        c.set_enabled(&id("A"), true);
+
+        assert!(c.view().include_default);
+        assert!(c.view().rows[0].checked);
     }
 
     #[test]

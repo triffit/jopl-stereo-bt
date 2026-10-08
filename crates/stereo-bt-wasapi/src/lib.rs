@@ -1,4 +1,4 @@
-//! Thin WASAPI adapter for `StereoBT`.
+//! Thin WASAPI adapter for `JOPL-StereoBT`.
 //!
 //! Wraps the `wasapi` crate into the few operations the engine needs:
 //! listing output devices, loopback-capturing the default output device,

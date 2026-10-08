@@ -1,4 +1,4 @@
-//! Platform-independent audio DSP and configuration model for `StereoBT`.
+//! Platform-independent audio DSP and configuration model for `JOPL-StereoBT`.
 //!
 //! Everything here compiles and is tested without Windows. The real-time
 //! processing types ([`OutputChain`], [`DelayLine`], [`pcm`]) never allocate

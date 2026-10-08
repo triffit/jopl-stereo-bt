@@ -1,6 +1,6 @@
 [package]
 name = "stereo-bt-wasapi"
-description = "Thin WASAPI adapter for StereoBT: loopback capture, per-device render, device notifications."
+description = "Thin WASAPI adapter for JOPL-StereoBT: loopback capture, per-device render, device notifications."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

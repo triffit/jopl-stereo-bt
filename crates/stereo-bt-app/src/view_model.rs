@@ -5,13 +5,31 @@ use stereo_bt_engine::{EngineStatus, StreamState};
 
 use crate::settings::{DeviceSettings, Settings};
 
-/// Color category of a device's health text.
+/// Color category of a device badge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Health {
-    Neutral,
+pub(crate) enum BadgeKind {
+    /// The default (source) device.
+    Info,
+    /// Playing in sync.
     Good,
+    Neutral,
     Warning,
     Error,
+}
+
+/// A small status pill on a device card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Badge {
+    pub(crate) text: &'static str,
+    pub(crate) kind: BadgeKind,
+}
+
+/// Overall engine state, shown as the colored dot in the info bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StatusKind {
+    Idle,
+    Streaming,
+    Waiting,
 }
 
 /// One device card.
@@ -21,12 +39,13 @@ pub(crate) struct DeviceRow {
     pub(crate) name: String,
     /// The Windows default device: the audio source, never a target.
     pub(crate) is_source: bool,
-    pub(crate) enabled: bool,
+    /// Checkbox state: for the source, whether it plays (include-default mode).
+    pub(crate) checked: bool,
+    pub(crate) subtitle: &'static str,
+    pub(crate) badge: Option<Badge>,
     pub(crate) channel_mode: ChannelMode,
     pub(crate) delay_ms: u16,
     pub(crate) volume_percent: u8,
-    pub(crate) health_text: String,
-    pub(crate) health: Health,
 }
 
 /// Present devices in Windows order, then remembered enabled devices that
@@ -57,55 +76,105 @@ fn row(
     settings: &Settings,
     status: &EngineStatus,
 ) -> DeviceRow {
-    let (health_text, health) = health(device, is_source, present, settings, status);
+    let (subtitle, badge) = describe(device, is_source, present, settings, status);
     DeviceRow {
         id: device.id.clone(),
         name: device.name.clone(),
         is_source,
-        enabled: device.enabled,
+        checked: if is_source {
+            settings.include_default
+        } else {
+            device.enabled
+        },
+        subtitle,
+        badge,
         channel_mode: device.channel_mode,
         delay_ms: device.delay.as_millis(),
         volume_percent: device.volume.as_percent(),
-        health_text: health_text.into(),
-        health,
     }
 }
 
-fn health(
+fn describe(
     device: &DeviceSettings,
     is_source: bool,
     present: bool,
     settings: &Settings,
     status: &EngineStatus,
-) -> (&'static str, Health) {
+) -> (&'static str, Option<Badge>) {
     if is_source {
-        return match (settings.include_default, status.running) {
-            (true, _) => ("Source · plays natively", Health::Neutral),
-            (false, true) => ("Source · muted while streaming", Health::Neutral),
-            (false, false) => ("Source · will be muted while streaming", Health::Neutral),
+        let subtitle = if settings.include_default {
+            "Default playback · plays natively"
+        } else {
+            "Default playback · muted while streaming"
         };
+        return (
+            subtitle,
+            Some(Badge {
+                text: "Default",
+                kind: BadgeKind::Info,
+            }),
+        );
     }
     if !device.enabled {
-        return ("Off", Health::Neutral);
+        return ("Secondary output", None);
     }
     if !present {
-        return ("Disconnected", Health::Warning);
+        return (
+            "Disconnected · rejoins automatically",
+            Some(Badge {
+                text: "Offline",
+                kind: BadgeKind::Warning,
+            }),
+        );
     }
     if !status.running {
-        return ("Ready", Health::Neutral);
+        return (
+            "Secondary output",
+            Some(Badge {
+                text: "Ready",
+                kind: BadgeKind::Neutral,
+            }),
+        );
     }
     match status.outputs.iter().find(|o| o.id == device.id) {
-        Some(o) if o.state == StreamState::Running => ("Playing", Health::Good),
-        Some(o) if o.state == StreamState::Failed => ("Device error", Health::Error),
-        Some(_) => ("Starting…", Health::Neutral),
-        None => ("Waiting", Health::Warning),
+        Some(o) if o.state == StreamState::Running => (
+            "Secondary output",
+            Some(Badge {
+                text: "Synced",
+                kind: BadgeKind::Good,
+            }),
+        ),
+        Some(o) if o.state == StreamState::Failed => (
+            "Device error",
+            Some(Badge {
+                text: "Error",
+                kind: BadgeKind::Error,
+            }),
+        ),
+        Some(_) => (
+            "Secondary output",
+            Some(Badge {
+                text: "Starting",
+                kind: BadgeKind::Neutral,
+            }),
+        ),
+        None => (
+            "Secondary output",
+            Some(Badge {
+                text: "Waiting",
+                kind: BadgeKind::Warning,
+            }),
+        ),
     }
 }
 
-/// One line summarizing the engine for the status bar.
+/// One line summarizing the engine for the info bar.
 pub(crate) fn status_line(settings: &Settings, status: &EngineStatus) -> String {
     if !status.running {
-        return "Stopped".into();
+        return match status.devices.len() {
+            1 => "1 device — select and start.".into(),
+            count => format!("{count} devices — select and start."),
+        };
     }
     let Some(source) = &status.source else {
         return "Waiting for devices…".into();
@@ -125,6 +194,15 @@ pub(crate) fn status_line(settings: &Settings, status: &EngineStatus) -> String 
         format!("{line} · {dropouts} dropouts")
     } else {
         line
+    }
+}
+
+/// The info-bar dot.
+pub(crate) fn status_kind(status: &EngineStatus) -> StatusKind {
+    match (status.running, status.outputs.is_empty()) {
+        (false, _) => StatusKind::Idle,
+        (true, false) => StatusKind::Streaming,
+        (true, true) => StatusKind::Waiting,
     }
 }
 
@@ -175,6 +253,10 @@ mod tests {
             .collect();
     }
 
+    fn badge_text(row: &DeviceRow) -> Option<&'static str> {
+        row.badge.as_ref().map(|b| b.text)
+    }
+
     #[test]
     fn rows_follow_windows_device_order_and_mark_the_source() {
         let (settings, status) = setup(&[]);
@@ -184,19 +266,33 @@ mod tests {
         let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, ["Device A", "Device B", "Device C"]);
         assert!(rows[0].is_source);
+        assert_eq!(badge_text(&rows[0]), Some("Default"));
         assert!(!rows[1].is_source);
+        assert_eq!(badge_text(&rows[1]), None);
     }
 
     #[test]
-    fn f6_disconnected_enabled_device_is_shown_as_disconnected() {
+    fn source_checkbox_shows_whether_it_plays() {
+        let (mut settings, status) = setup(&[]);
+        assert!(!device_rows(&settings, &status)[0].checked);
+
+        settings.include_default = true;
+
+        let rows = device_rows(&settings, &status);
+        assert!(rows[0].checked);
+        assert_eq!(rows[0].subtitle, "Default playback · plays natively");
+    }
+
+    #[test]
+    fn f6_disconnected_enabled_device_is_shown_offline() {
         let (settings, mut status) = setup(&["C"]);
         status.devices.retain(|d| d.id != id("C"));
 
         let rows = device_rows(&settings, &status);
 
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[2].health_text, "Disconnected");
-        assert_eq!(rows[2].health, Health::Warning);
+        assert_eq!(badge_text(&rows[2]), Some("Offline"));
+        assert_eq!(rows[2].badge.as_ref().unwrap().kind, BadgeKind::Warning);
     }
 
     #[test]
@@ -208,8 +304,12 @@ mod tests {
     }
 
     #[test]
-    fn health_reflects_stream_state_while_running() {
+    fn badges_reflect_stream_state_while_running() {
         let (settings, mut status) = setup(&["B", "C"]);
+        assert_eq!(
+            badge_text(&device_rows(&settings, &status)[1]),
+            Some("Ready")
+        );
         running(
             &mut status,
             &[
@@ -220,33 +320,19 @@ mod tests {
 
         let rows = device_rows(&settings, &status);
 
-        assert_eq!(rows[1].health_text, "Playing");
-        assert_eq!(rows[1].health, Health::Good);
-        assert_eq!(rows[2].health_text, "Device error");
-        assert_eq!(rows[2].health, Health::Error);
+        assert_eq!(badge_text(&rows[1]), Some("Synced"));
+        assert_eq!(badge_text(&rows[2]), Some("Error"));
+        assert_eq!(rows[2].subtitle, "Device error");
     }
 
     #[test]
-    fn source_text_depends_on_include_default() {
-        let (mut settings, mut status) = setup(&[]);
-        running(&mut status, &[]);
-        assert_eq!(
-            device_rows(&settings, &status)[0].health_text,
-            "Source · muted while streaming"
-        );
-
-        settings.include_default = true;
-
-        assert_eq!(
-            device_rows(&settings, &status)[0].health_text,
-            "Source · plays natively"
-        );
-    }
-
-    #[test]
-    fn status_line_summarizes_streaming_and_dropouts() {
+    fn status_line_counts_devices_when_stopped_and_summarizes_streaming() {
         let (settings, mut status) = setup(&["B"]);
-        assert_eq!(status_line(&settings, &status), "Stopped");
+        assert_eq!(
+            status_line(&settings, &status),
+            "3 devices — select and start."
+        );
+        assert_eq!(status_kind(&status), StatusKind::Idle);
 
         running(&mut status, &[("B", StreamState::Running, 3)]);
 
@@ -254,5 +340,14 @@ mod tests {
             status_line(&settings, &status),
             "Streaming from Device A to 1 device · 3 dropouts"
         );
+        assert_eq!(status_kind(&status), StatusKind::Streaming);
+    }
+
+    #[test]
+    fn running_without_outputs_is_waiting() {
+        let (_, mut status) = setup(&[]);
+        running(&mut status, &[]);
+
+        assert_eq!(status_kind(&status), StatusKind::Waiting);
     }
 }

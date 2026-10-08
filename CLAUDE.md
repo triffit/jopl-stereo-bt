@@ -25,14 +25,17 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   `Platform` + `MuteJournal` traits. `Engine` runs it on its own thread (commands with
   replies, device events debounced 300 ms, status snapshot). Mutes are journaled *before*
   muting and restored on stop, drop and next start (`FileMuteJournal`).
-- `crates/stereo-bt-app` — binary `stereo-bt` (Slint 1.18, `fluent-dark` style via
+- `crates/stereo-bt-app` — binary `jopl-stereo-bt` (Slint 1.18, `fluent-dark` style via
   `build.rs`). Logic in `controller.rs` (behind `EngineControl` + `SettingsStore` traits,
   fully unit-tested), pure `view_model.rs`, persisted `settings.rs` (TOML in
-  `%APPDATA%\StereoBT\settings.toml`, per-device by endpoint id). `ui.rs` is glue only;
+  `%APPDATA%\JOPL-StereoBT\settings.toml`, per-device by endpoint id). `ui.rs` is glue only;
   generated Slint code lives in a lint-exempt `generated` module. UI edits are coalesced and
   pushed to the engine on the 100 ms timer; settings saved 1 s after the last edit and on exit.
 - Slint licence (Royalty-free Desktop 2.0): the About popup **must** keep `AboutSlint`.
-- Planned: tray icon (F7), resampling drift correction, Mica backdrop.
+- Tray (F7, `tray.rs`, `tray-icon` crate): polled on the UI timer; closing the window while
+  streaming hides to tray, closing while stopped (or without a tray) quits. Event loop runs via
+  `run_event_loop_until_quit`. Icon drawn in code (`icon.rs`).
+- Planned: resampling drift correction, Mica backdrop, `.ico` + installer.
 
 ## Slint notes
 
@@ -40,6 +43,11 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - User interaction replaces a control's value binding; components re-push model values in a
   `changed device => { ... }` handler. Element ids inside `if` blocks are not reachable from
   outside, so such controls live in their own component (`DeviceControls`).
+- Look follows WaveSync (dark navy cards, purple→blue gradient): tokens in `ui/theme.slint`,
+  custom accessible controls in `ui/controls.slint` (`AccentSlider` with arrow/PageUp/Home/End
+  keys, `AccentCheckBox`, `Segmented`, `Pill`, `OutlineButton`, `GradientButton`). Std
+  widgets only for `ScrollView` and `AboutSlint`.
+- The source (default) device's checkbox is the include-default toggle.
 
 ## Sync model
 
