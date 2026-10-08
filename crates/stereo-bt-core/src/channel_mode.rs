@@ -4,7 +4,10 @@ use crate::Frame;
 ///
 /// Two devices set to [`ChannelMode::LeftOnly`] and [`ChannelMode::RightOnly`]
 /// form a stereo pair.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
 pub enum ChannelMode {
     /// Left to left, right to right.
     #[default]

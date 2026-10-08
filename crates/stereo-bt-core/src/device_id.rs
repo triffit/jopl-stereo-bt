@@ -3,7 +3,10 @@ use std::fmt;
 use crate::Error;
 
 /// A validated, opaque audio endpoint identifier (the Windows endpoint ID string).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(try_from = "String", into = "String")]
 pub struct DeviceId(String);
 
 impl DeviceId {
@@ -37,5 +40,19 @@ impl DeviceId {
 impl fmt::Display for DeviceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+impl TryFrom<String> for DeviceId {
+    type Error = Error;
+
+    fn try_from(raw: String) -> Result<Self, Error> {
+        Self::new(raw)
+    }
+}
+
+impl From<DeviceId> for String {
+    fn from(id: DeviceId) -> Self {
+        id.0
     }
 }

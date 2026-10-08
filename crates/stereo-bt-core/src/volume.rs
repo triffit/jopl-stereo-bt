@@ -1,7 +1,10 @@
 use crate::Error;
 
 /// A validated per-device volume in whole percent (`0..=100`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(try_from = "u8", into = "u8")]
 pub struct Volume(u8);
 
 impl Volume {
@@ -41,5 +44,19 @@ impl Volume {
 impl Default for Volume {
     fn default() -> Self {
         Self::FULL
+    }
+}
+
+impl TryFrom<u8> for Volume {
+    type Error = Error;
+
+    fn try_from(percent: u8) -> Result<Self, Error> {
+        Self::from_percent(percent)
+    }
+}
+
+impl From<Volume> for u8 {
+    fn from(volume: Volume) -> Self {
+        volume.as_percent()
     }
 }

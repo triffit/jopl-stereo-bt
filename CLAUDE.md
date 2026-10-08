@@ -25,7 +25,21 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   `Platform` + `MuteJournal` traits. `Engine` runs it on its own thread (commands with
   replies, device events debounced 300 ms, status snapshot). Mutes are journaled *before*
   muting and restored on stop, drop and next start (`FileMuteJournal`).
-- Planned: resampling drift correction, `app` (Slint `fluent-dark`).
+- `crates/stereo-bt-app` — binary `stereo-bt` (Slint 1.18, `fluent-dark` style via
+  `build.rs`). Logic in `controller.rs` (behind `EngineControl` + `SettingsStore` traits,
+  fully unit-tested), pure `view_model.rs`, persisted `settings.rs` (TOML in
+  `%APPDATA%\StereoBT\settings.toml`, per-device by endpoint id). `ui.rs` is glue only;
+  generated Slint code lives in a lint-exempt `generated` module. UI edits are coalesced and
+  pushed to the engine on the 100 ms timer; settings saved 1 s after the last edit and on exit.
+- Slint licence (Royalty-free Desktop 2.0): the About popup **must** keep `AboutSlint`.
+- Planned: tray icon (F7), resampling drift correction, Mica backdrop.
+
+## Slint notes
+
+- `row` and `close` are reserved names in Slint; don't use them for properties/callbacks.
+- User interaction replaces a control's value binding; components re-push model values in a
+  `changed device => { ... }` handler. Element ids inside `if` blocks are not reachable from
+  outside, so such controls live in their own component (`DeviceControls`).
 
 ## Sync model
 

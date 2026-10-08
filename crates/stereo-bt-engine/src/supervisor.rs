@@ -1,6 +1,6 @@
 use std::io;
 
-use stereo_bt_core::DeviceId;
+use stereo_bt_core::{DeviceId, DeviceInfo};
 
 use crate::{
     EngineConfig, MuteJournal, OutputConfig, OutputStatus, Platform, Session, StreamState,
@@ -32,6 +32,8 @@ pub struct EngineStatus {
     pub outputs: Vec<OutputStatus>,
     /// Sessions started so far (each device-set or source change starts one).
     pub session_starts: u64,
+    /// Active output devices, refreshed on every change (also while stopped).
+    pub devices: Vec<DeviceInfo>,
 }
 
 struct ActiveSession {
@@ -55,6 +57,7 @@ pub struct Supervisor<P: Platform, J: MuteJournal> {
     active: Option<ActiveSession>,
     muted_by_us: Vec<DeviceId>,
     session_starts: u64,
+    devices: Vec<DeviceInfo>,
 }
 
 impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
@@ -74,6 +77,7 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             active: None,
             muted_by_us,
             session_starts: 0,
+            devices: Vec::new(),
         };
         supervisor.reconcile()?;
         Ok(supervisor)
@@ -139,21 +143,30 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
                 .map(|a| a.session.output_status())
                 .unwrap_or_default(),
             session_starts: self.session_starts,
+            devices: self.devices.clone(),
         }
     }
 
     fn reconcile(&mut self) -> Result<(), SupervisorError> {
-        let source = if self.running {
-            self.platform.default_output().map_err(platform_error)?
-        } else {
-            None
+        // Fail safe: when devices cannot be queried, stop streaming and
+        // restore mutes, then report the error.
+        let query = self.platform.outputs().map_err(platform_error);
+        if let Ok(devices) = &query {
+            self.devices.clone_from(devices);
+        }
+        let source = match &query {
+            Ok(devices) if self.running => {
+                devices.iter().find(|d| d.is_default).map(|d| d.id.clone())
+            }
+            _ => None,
         };
         let mute_target = source.clone().filter(|_| !self.config.include_default);
         self.restore_mutes_except(mute_target.as_ref())?;
         if let Some(id) = &mute_target {
             self.mute(id)?;
         }
-        self.reconcile_session(source)
+        self.reconcile_session(source)?;
+        query.map(|_| ())
     }
 
     /// Unmutes every device we muted except `keep`. A device that cannot be
@@ -186,12 +199,12 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             self.active = None;
             return Ok(());
         };
-        let present = self.platform.active_outputs().map_err(platform_error)?;
+        let present = |id: &DeviceId| self.devices.iter().any(|d| &d.id == id);
         let desired: Vec<OutputConfig> = self
             .config
             .outputs
             .iter()
-            .filter(|o| o.id != source && present.contains(&o.id))
+            .filter(|o| o.id != source && present(&o.id))
             .cloned()
             .collect();
         if desired.is_empty() {
@@ -206,7 +219,7 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             let deselected = active
                 .outputs
                 .iter()
-                .any(|id| present.contains(id) && !desired.iter().any(|o| &o.id == id));
+                .any(|id| present(id) && !desired.iter().any(|o| &o.id == id));
             active.source != source || added || deselected
         });
         if restart {
@@ -484,16 +497,44 @@ mod tests {
     }
 
     #[test]
+    fn status_lists_devices_even_while_stopped() {
+        let w = world("A", &["A", "B"]);
+        let (s, _) = supervisor(&w, &[]);
+
+        let devices = s.status().devices;
+
+        assert_eq!(devices.len(), 2);
+        assert!(devices.iter().any(|d| d.id == id("A") && d.is_default));
+    }
+
+    #[test]
+    fn device_list_follows_hot_plug_while_stopped() {
+        let w = world("A", &["A"]);
+        let (mut s, _) = supervisor(&w, &[]);
+
+        lock(&w).active.push(id("B"));
+        s.devices_changed().unwrap();
+
+        assert_eq!(s.status().devices.len(), 2);
+    }
+
+    #[test]
     fn session_streams_after_start() {
         let w = world("A", &["A", "B"]);
         let (mut s, _) = supervisor(&w, &[]);
         s.start(config(&["B"], false)).unwrap();
 
+        // Capture and render threads start independently; wait for both.
         let deadline = Instant::now() + Duration::from_secs(5);
-        while s.status().outputs[0].state != StreamState::Running {
-            assert!(Instant::now() < deadline, "output never started");
+        loop {
+            let status = s.status();
+            if status.capture == Some(StreamState::Running)
+                && status.outputs[0].state == StreamState::Running
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "session never started");
             thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(s.status().capture, Some(StreamState::Running));
     }
 }

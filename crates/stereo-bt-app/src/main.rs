@@ -1,0 +1,43 @@
+//! `StereoBT`: play system audio on several devices at once, in sync.
+//!
+//! Binary edge: wires the engine, settings store and window together.
+//! All logic lives in `controller` and the engine crates.
+
+// No console window in release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod controller;
+mod settings;
+mod settings_store;
+mod ui;
+mod view_model;
+
+#[cfg(windows)]
+fn main() -> anyhow::Result<()> {
+    use anyhow::Context;
+    use stereo_bt_engine::{Engine, FileMuteJournal};
+
+    use crate::settings_store::FileSettingsStore;
+
+    let data_dir = std::env::var_os("APPDATA")
+        .map(|dir| std::path::PathBuf::from(dir).join("StereoBT"))
+        .context("the APPDATA environment variable is not set")?;
+
+    match Engine::spawn(FileMuteJournal::new(data_dir.join("mute-journal.txt"))) {
+        Ok(engine) => {
+            ui::run_main(
+                engine,
+                FileSettingsStore::new(data_dir.join("settings.toml")),
+            )?;
+        }
+        Err(error) => ui::show_error(&format!(
+            "The Windows audio system could not be initialised: {error}"
+        ))?,
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn main() -> anyhow::Result<()> {
+    anyhow::bail!("StereoBT runs on Windows only")
+}

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
-use stereo_bt_core::{DeviceId, Frame, SampleRate};
+use stereo_bt_core::{DeviceId, DeviceInfo, Frame, SampleRate};
 
 use crate::{Backend, CaptureStream, MuteJournal, Platform, RenderSink};
 
@@ -130,12 +130,17 @@ impl Platform for FakePlatform {
         SampleRate::HZ_48000
     }
 
-    fn default_output(&self) -> Result<Option<DeviceId>, FakeError> {
-        Ok(lock(&self.world).default.clone())
-    }
-
-    fn active_outputs(&self) -> Result<Vec<DeviceId>, FakeError> {
-        Ok(lock(&self.world).active.clone())
+    fn outputs(&self) -> Result<Vec<DeviceInfo>, FakeError> {
+        let world = lock(&self.world);
+        Ok(world
+            .active
+            .iter()
+            .map(|id| DeviceInfo {
+                id: id.clone(),
+                name: id.to_string(),
+                is_default: world.default.as_ref() == Some(id),
+            })
+            .collect())
     }
 
     fn is_muted(&self, id: &DeviceId) -> Result<bool, FakeError> {

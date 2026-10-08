@@ -1,0 +1,275 @@
+// StereoBT main window. Styled with the Fluent dark widget style (set in build.rs).
+
+import {
+    AboutSlint, Button, ComboBox, HorizontalBox, Palette, ScrollView, Slider, Switch, VerticalBox,
+} from "std-widgets.slint";
+
+export struct DeviceRow {
+    id: string,
+    name: string,
+    is-source: bool,
+    enabled: bool,
+    // 0 stereo, 1 left only, 2 right only, 3 mono mix
+    mode: int,
+    delay: float,
+    volume: float,
+    health-text: string,
+    // 0 neutral, 1 good, 2 warning, 3 error
+    health: int,
+}
+
+component HealthText inherits Text {
+    in property <int> health;
+    font-size: 12px;
+    color: health == 1 ? #6ccb5f : health == 2 ? #fce100 : health == 3 ? #ff99a4 : Palette.foreground.with-alpha(0.65);
+}
+
+// Channel, delay and volume controls of one target device.
+component DeviceControls inherits GridLayout {
+    in property <DeviceRow> device;
+    callback mode-changed(int);
+    callback delay-changed(float);
+    callback delay-nudged(int);
+    callback volume-changed(float);
+
+    // User interaction replaces a control's value binding, so push
+    // external changes (nudge buttons, saved settings) in explicitly.
+    changed device => {
+        mode-box.current-index = device.mode;
+        delay-slider.value = device.delay;
+        volume-slider.value = device.volume;
+    }
+
+    spacing: 8px;
+    Row {
+        Text { text: "Channels"; vertical-alignment: center; }
+        mode-box := ComboBox {
+            colspan: 3;
+            model: ["Stereo", "Left only", "Right only", "Mono mix"];
+            current-index: device.mode;
+            accessible-label: "Channels for " + device.name;
+            selected => { root.mode-changed(self.current-index); }
+        }
+    }
+    Row {
+        Text { text: "Delay"; vertical-alignment: center; }
+        delay-slider := Slider {
+            minimum: 0;
+            maximum: 500;
+            step: 1;
+            value: device.delay;
+            accessible-label: "Delay for " + device.name;
+            changed(value) => { root.delay-changed(value); }
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            Button {
+                text: "−";
+                accessible-label: "One millisecond less delay";
+                clicked => { root.delay-nudged(-1); }
+            }
+            Button {
+                text: "+";
+                accessible-label: "One millisecond more delay";
+                clicked => { root.delay-nudged(1); }
+            }
+        }
+        Text {
+            text: round(device.delay) + " ms";
+            min-width: 56px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+    Row {
+        Text { text: "Volume"; vertical-alignment: center; }
+        volume-slider := Slider {
+            colspan: 2;
+            minimum: 0;
+            maximum: 100;
+            step: 1;
+            value: device.volume;
+            accessible-label: "Volume for " + device.name;
+            changed(value) => { root.volume-changed(value); }
+        }
+        Text {
+            text: round(device.volume) + " %";
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component DeviceCard inherits Rectangle {
+    in property <DeviceRow> device;
+    callback enabled-changed(bool);
+    callback mode-changed(int);
+    callback delay-changed(float);
+    callback delay-nudged(int);
+    callback volume-changed(float);
+
+    changed device => {
+        play-switch.checked = device.enabled && !device.is-source;
+    }
+
+    border-radius: 8px;
+    background: Palette.alternate-background;
+    border-width: 1px;
+    border-color: Palette.border;
+
+    VerticalBox {
+        HorizontalBox {
+            padding: 0;
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: device.name;
+                    font-size: 15px;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                HealthText {
+                    text: device.health-text;
+                    health: device.health;
+                }
+            }
+            play-switch := Switch {
+                text: device.is-source ? "Source" : "Play";
+                enabled: !device.is-source;
+                checked: device.enabled && !device.is-source;
+                accessible-label: "Play on " + device.name;
+                toggled => { root.enabled-changed(self.checked); }
+            }
+        }
+
+        if !device.is-source: DeviceControls {
+            device: root.device;
+            mode-changed(mode) => { root.mode-changed(mode); }
+            delay-changed(value) => { root.delay-changed(value); }
+            delay-nudged(step) => { root.delay-nudged(step); }
+            volume-changed(value) => { root.volume-changed(value); }
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "StereoBT";
+    icon: @image-url("icon.png");
+    min-width: 460px;
+    preferred-width: 520px;
+    min-height: 420px;
+    preferred-height: 640px;
+
+    in property <[DeviceRow]> devices;
+    in property <bool> running;
+    in property <bool> include-default;
+    in property <string> status-line;
+    in property <string> error-text;
+    in property <string> version;
+
+    callback toggle-running();
+    callback include-default-changed(bool);
+    callback enabled-changed(string, bool);
+    callback mode-changed(string, int);
+    callback delay-changed(string, float);
+    callback delay-nudged(string, int);
+    callback volume-changed(string, float);
+
+    about-popup := PopupWindow {
+        x: (root.width - 360px) / 2;
+        y: 40px;
+        width: 360px;
+        Rectangle {
+            background: Palette.background;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Palette.border;
+            VerticalBox {
+                Text { text: "StereoBT " + root.version; font-size: 18px; font-weight: 600; }
+                Text {
+                    text: "Play system audio on several devices at once, in sync.\nMIT licence · © 2026 JOPL, Triffit\nInspired by WaveSync.";
+                    wrap: word-wrap;
+                }
+                AboutSlint { }
+            }
+        }
+    }
+
+    VerticalBox {
+        HorizontalBox {
+            padding: 0;
+            VerticalLayout {
+                alignment: center;
+                Text { text: "StereoBT"; font-size: 24px; font-weight: 700; }
+                Text {
+                    text: "System audio on several devices, in sync";
+                    color: Palette.foreground.with-alpha(0.65);
+                }
+            }
+            Button {
+                text: root.running ? "Stop" : "Start";
+                primary: true;
+                horizontal-stretch: 0;
+                min-width: 120px;
+                accessible-label: root.running ? "Stop streaming" : "Start streaming";
+                clicked => { root.toggle-running(); }
+            }
+        }
+
+        Switch {
+            text: "Keep default device playing (no mute)";
+            checked: root.include-default;
+            toggled => { root.include-default-changed(self.checked); }
+        }
+
+        ScrollView {
+            VerticalLayout {
+                spacing: 8px;
+                for row in root.devices: DeviceCard {
+                    device: row;
+                    enabled-changed(on) => { root.enabled-changed(row.id, on); }
+                    mode-changed(mode) => { root.mode-changed(row.id, mode); }
+                    delay-changed(value) => { root.delay-changed(row.id, value); }
+                    delay-nudged(step) => { root.delay-nudged(row.id, step); }
+                    volume-changed(value) => { root.volume-changed(row.id, value); }
+                }
+                if root.devices.length == 0: Text {
+                    text: "No output devices found.";
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        HorizontalBox {
+            padding: 0;
+            VerticalLayout {
+                alignment: center;
+                Text { text: root.status-line; font-size: 12px; overflow: elide; }
+                if root.error-text != "": Text {
+                    text: root.error-text;
+                    font-size: 12px;
+                    color: #ff99a4;
+                    wrap: word-wrap;
+                }
+            }
+            Button {
+                text: "About";
+                horizontal-stretch: 0;
+                clicked => { about-popup.show(); }
+            }
+        }
+    }
+}
+
+// Shown instead of the main window when the audio engine cannot start.
+export component ErrorWindow inherits Window {
+    title: "StereoBT";
+    in property <string> message;
+    callback close-requested();
+    VerticalBox {
+        Text { text: "StereoBT could not start"; font-size: 18px; font-weight: 600; }
+        Text { text: root.message; wrap: word-wrap; }
+        Button { text: "Close"; clicked => { root.close-requested(); } }
+    }
+}

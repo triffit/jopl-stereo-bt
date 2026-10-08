@@ -1,7 +1,20 @@
 use crate::{Error, SampleRate};
 
 /// A validated per-device sync delay in whole milliseconds.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(try_from = "u16", into = "u16")]
 pub struct Delay(u16);
 
 impl Delay {
@@ -36,5 +49,19 @@ impl Delay {
     pub const fn frames_at(self, rate: SampleRate) -> usize {
         // At most 500 ms * 384 kHz = 192_000_000, which fits in u32 and usize.
         (self.0 as u32 * rate.as_hz() / 1_000) as usize
+    }
+}
+
+impl TryFrom<u16> for Delay {
+    type Error = Error;
+
+    fn try_from(millis: u16) -> Result<Self, Error> {
+        Self::from_millis(millis)
+    }
+}
+
+impl From<Delay> for u16 {
+    fn from(delay: Delay) -> Self {
+        delay.as_millis()
     }
 }

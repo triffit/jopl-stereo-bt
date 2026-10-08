@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/stereo-bt-app",
     "crates/stereo-bt-core",
     "crates/stereo-bt-engine",
     "crates/stereo-bt-wasapi",
@@ -16,8 +17,12 @@ publish = false
 
 [workspace.dependencies]
 stereo-bt-core = { path = "crates/stereo-bt-core" }
+stereo-bt-engine = { path = "crates/stereo-bt-engine" }
 stereo-bt-wasapi = { path = "crates/stereo-bt-wasapi" }
+anyhow = "1"
 rtrb = "0.4"
+slint = "1.18"
+slint-build = "1.18"
 thiserror = "2"
 wasapi = "0.25"
 windows = { version = "0.62", features = [
@@ -28,6 +33,8 @@ windows = { version = "0.62", features = [
     "Win32_System_Threading",
 ] }
 proptest = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -1,7 +1,7 @@
 use std::error::Error as StdError;
 use std::sync::Arc;
 
-use stereo_bt_core::{DeviceId, SampleRate};
+use stereo_bt_core::{DeviceId, DeviceInfo, SampleRate};
 
 use crate::Backend;
 
@@ -20,19 +20,13 @@ pub trait Platform {
     /// The stream sample rate.
     fn sample_rate(&self) -> SampleRate;
 
-    /// The current default output device (the capture source), if any.
+    /// All currently active output devices; at most one has `is_default` set
+    /// (the capture source).
     ///
     /// # Errors
     ///
     /// Returns an error when devices cannot be queried.
-    fn default_output(&self) -> Result<Option<DeviceId>, Self::Error>;
-
-    /// All currently active output devices.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when devices cannot be queried.
-    fn active_outputs(&self) -> Result<Vec<DeviceId>, Self::Error>;
+    fn outputs(&self) -> Result<Vec<DeviceInfo>, Self::Error>;
 
     /// Whether device `id` is muted.
     ///
