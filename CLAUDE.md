@@ -21,7 +21,10 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   (`OutputControls`). Manual hardware check: `cargo run -p stereo-bt-engine --example route`.
 - Engine control: `Supervisor` (single-threaded state machine; every change goes through
   `reconcile()`: source = default device, mute it unless `include_default`, session = selected
-  ∩ present − source; restart only on source change, added or deselected device) behind
+  ∩ present − source). Only a source change restarts the session; devices are added/removed
+  individually (`Session::add_output`/`remove_output`, new queues reach the capture thread via
+  a channel) so others keep playing. `Supervisor::maintain(now)` (engine loop, every 100 ms)
+  retries failed outputs/capture after `RETRY_DELAY` (3 s); errors are shown per device. Behind
   `Platform` + `MuteJournal` traits. `Engine` runs it on its own thread (commands with
   replies, device events debounced 300 ms, status snapshot). Mutes are journaled *before*
   muting and restored on stop, drop and next start (`FileMuteJournal`).

@@ -22,12 +22,21 @@ impl fmt::Display for FakeError {
 
 impl std::error::Error for FakeError {}
 
-/// Captures silence and discards rendered audio.
-pub(crate) struct SilentBackend;
+/// Captures silence and discards rendered audio; devices listed in
+/// `World::failing` fail to open and fail while playing.
+pub(crate) struct SilentBackend {
+    world: SharedWorld,
+}
 
-pub(crate) struct SilentCapture([Frame; 480]);
+pub(crate) struct SilentCapture {
+    block: [Frame; 480],
+    world: SharedWorld,
+}
 
-pub(crate) struct DiscardRender;
+pub(crate) struct DiscardRender {
+    id: DeviceId,
+    world: SharedWorld,
+}
 
 impl Backend for SilentBackend {
     type Error = FakeError;
@@ -40,11 +49,25 @@ impl Backend for SilentBackend {
     }
 
     fn open_capture(&self) -> Result<SilentCapture, FakeError> {
-        Ok(SilentCapture([Frame::SILENCE; 480]))
+        if lock(&self.world).capture_failing {
+            return Err(FakeError);
+        }
+        Ok(SilentCapture {
+            block: [Frame::SILENCE; 480],
+            world: Arc::clone(&self.world),
+        })
     }
 
-    fn open_render(&self, _id: &DeviceId) -> Result<DiscardRender, FakeError> {
-        Ok(DiscardRender)
+    fn open_render(&self, id: &DeviceId) -> Result<DiscardRender, FakeError> {
+        let mut world = lock(&self.world);
+        world.render_opens.push(id.clone());
+        if world.failing.contains(id) {
+            return Err(FakeError);
+        }
+        Ok(DiscardRender {
+            id: id.clone(),
+            world: Arc::clone(&self.world),
+        })
     }
 }
 
@@ -57,7 +80,10 @@ impl CaptureStream for SilentCapture {
 
     fn read(&mut self, _timeout_ms: u32) -> Result<&[Frame], FakeError> {
         thread::sleep(Duration::from_millis(5));
-        Ok(&self.0)
+        if lock(&self.world).capture_failing {
+            return Err(FakeError);
+        }
+        Ok(&self.block)
     }
 }
 
@@ -82,6 +108,9 @@ impl RenderSink for DiscardRender {
     }
 
     fn write(&mut self, _frames: &[Frame]) -> Result<(), FakeError> {
+        if lock(&self.world).failing.contains(&self.id) {
+            return Err(FakeError);
+        }
         Ok(())
     }
 }
@@ -92,6 +121,12 @@ pub(crate) struct World {
     pub(crate) default: Option<DeviceId>,
     pub(crate) active: Vec<DeviceId>,
     pub(crate) muted: HashSet<DeviceId>,
+    /// Devices whose streams fail to open and fail while playing.
+    pub(crate) failing: HashSet<DeviceId>,
+    /// Whether the capture stream fails.
+    pub(crate) capture_failing: bool,
+    /// Every render stream opened, in order.
+    pub(crate) render_opens: Vec<DeviceId>,
 }
 
 /// A world shared between the test and the platform (possibly on another thread).
@@ -112,7 +147,9 @@ pub(crate) struct FakePlatform {
 impl FakePlatform {
     pub(crate) fn new(world: &SharedWorld) -> Self {
         Self {
-            backend: Arc::new(SilentBackend),
+            backend: Arc::new(SilentBackend {
+                world: Arc::clone(world),
+            }),
             world: Arc::clone(world),
         }
     }

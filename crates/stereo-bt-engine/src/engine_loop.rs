@@ -56,10 +56,15 @@ pub(crate) fn run<P: Platform, J: MuteJournal>(
         if device_events.try_iter().count() > 0 {
             last_device_event = Some(Instant::now());
         }
-        let mut error = None;
+        let mut error = supervisor
+            .maintain(Instant::now())
+            .err()
+            .map(|e| e.to_string());
         if last_device_event.is_some_and(|at| at.elapsed() >= SETTLE) {
             last_device_event = None;
-            error = supervisor.devices_changed().err().map(|e| e.to_string());
+            if let Err(e) = supervisor.devices_changed() {
+                error = Some(e.to_string());
+            }
         }
 
         let mut shared = shared.lock().unwrap_or_else(PoisonError::into_inner);

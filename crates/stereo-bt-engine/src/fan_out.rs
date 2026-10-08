@@ -7,9 +7,9 @@ use crate::output_controls::OutputControls;
 
 /// Copies every captured block into each output's queue (PRODUCT.md F1).
 ///
-/// Lock- and allocation-free. A full queue drops the newest frames for that
-/// output only and counts an overrun; a queue whose render thread has exited
-/// is skipped, so one failed device never affects the others.
+/// Lock- and allocation-free while pushing. A full queue drops the newest
+/// frames for that output only and counts an overrun; a queue whose render
+/// thread has exited is dropped, so one failed device never affects the others.
 pub(crate) struct FanOut {
     outputs: Vec<(Producer<Frame>, Arc<OutputControls>)>,
 }
@@ -19,11 +19,16 @@ impl FanOut {
         Self { outputs }
     }
 
+    /// Adds an output queue (when a device is added or restarted).
+    pub(crate) fn add(&mut self, producer: Producer<Frame>, controls: Arc<OutputControls>) {
+        self.outputs.push((producer, controls));
+    }
+
     pub(crate) fn push(&mut self, frames: &[Frame]) {
+        // `retain` never allocates; it only drops queues of exited outputs.
+        self.outputs
+            .retain(|(producer, _)| !producer.is_abandoned());
         for (producer, controls) in &mut self.outputs {
-            if producer.is_abandoned() {
-                continue;
-            }
             let (_pushed, dropped) = producer.push_partial_slice(frames);
             if !dropped.is_empty() {
                 controls.add_overrun();
@@ -84,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn output_whose_render_thread_exited_is_skipped() {
+    fn output_whose_render_thread_exited_is_dropped() {
         let (producer, consumer) = RingBuffer::new(2);
         let c = controls();
         let mut fan_out = FanOut::new(vec![(producer, Arc::clone(&c))]);
@@ -93,5 +98,18 @@ mod tests {
         fan_out.push(&frames(4));
 
         assert_eq!(c.overruns(), 0);
+        assert!(fan_out.outputs.is_empty());
+    }
+
+    #[test]
+    fn added_output_receives_frames_from_then_on() {
+        let mut fan_out = FanOut::new(Vec::new());
+        fan_out.push(&frames(2));
+        let (producer, consumer) = RingBuffer::new(16);
+
+        fan_out.add(producer, controls());
+        fan_out.push(&frames(3));
+
+        assert_eq!(consumer.slots(), 3);
     }
 }

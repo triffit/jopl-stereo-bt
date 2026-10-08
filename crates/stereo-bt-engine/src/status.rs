@@ -26,4 +26,6 @@ pub struct OutputStatus {
     pub overruns: u64,
     /// Times clock drift was corrected by trimming the queue.
     pub trims: u64,
+    /// Why the stream failed, when `state` is [`StreamState::Failed`].
+    pub error: Option<String>,
 }

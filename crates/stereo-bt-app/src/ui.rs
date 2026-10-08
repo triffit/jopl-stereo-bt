@@ -232,7 +232,7 @@ fn to_ui_row(row: &DeviceRow) -> generated::DeviceRow {
         name: row.name.as_str().into(),
         is_source: row.is_source,
         checked: row.checked,
-        subtitle: row.subtitle.into(),
+        subtitle: row.subtitle.as_str().into(),
         badge: row.badge.as_ref().map_or("", |b| b.text).into(),
         badge_kind: row.badge.as_ref().map_or(2, |b| match b.kind {
             BadgeKind::Info => 0,

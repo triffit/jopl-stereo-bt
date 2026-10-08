@@ -97,6 +97,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                 output.trims
             );
         }
+        if let Some(error) = &status.capture_error {
+            println!("  capture error: {error}");
+        }
+        for output in status.outputs.iter().filter(|o| o.error.is_some()) {
+            println!(
+                "  {} error: {}",
+                name(&output.id),
+                output.error.as_deref().unwrap_or_default()
+            );
+        }
         if let Some(error) = engine.last_error() {
             println!("  last error: {error}");
         }

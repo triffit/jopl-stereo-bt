@@ -1,8 +1,10 @@
-use std::sync::Arc;
+use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 
-use rtrb::{Consumer, RingBuffer};
+use rtrb::{Consumer, Producer, RingBuffer};
 use stereo_bt_core::{ChannelMode, Delay, DeviceId, Frame, Playout, SampleRate, Volume};
 
 use crate::backend::{Backend, CaptureStream, RenderSink};
@@ -13,106 +15,172 @@ use crate::state_cell::StateCell;
 use crate::tuning::{CUSHION_FRAMES, MAX_EXCESS_FRAMES, QUEUE_FRAMES, WAIT_TIMEOUT_MS};
 use crate::{OutputConfig, OutputStatus, StreamState};
 
-/// A running route: one capture thread fanning out to one render thread per
-/// output device. Stops and joins all threads when dropped.
-pub struct Session {
-    stop: Arc<AtomicBool>,
-    capture_state: Arc<StateCell>,
-    outputs: Vec<(DeviceId, Arc<OutputControls>)>,
-    threads: Vec<JoinHandle<()>>,
+/// A new output queue handed to the capture thread.
+type NewOutput = (Producer<Frame>, Arc<OutputControls>);
+
+/// State and last error of the capture thread.
+#[derive(Debug, Default)]
+struct CaptureShared {
+    state: StateCell,
+    error: Mutex<Option<String>>,
 }
 
-impl Session {
+struct OutputHandle {
+    id: DeviceId,
+    controls: Arc<OutputControls>,
+    thread: Option<JoinHandle<()>>,
+}
+
+/// A running route: one capture thread fanning out to one render thread per
+/// output device. Outputs can be added, removed and restarted while it runs
+/// without disturbing the others. Stops and joins all threads when dropped.
+pub struct Session<B: Backend> {
+    backend: Arc<B>,
+    sample_rate: SampleRate,
+    stop: Arc<AtomicBool>,
+    capture: Arc<CaptureShared>,
+    capture_thread: Option<JoinHandle<()>>,
+    new_outputs: Sender<NewOutput>,
+    outputs: Vec<OutputHandle>,
+}
+
+impl<B: Backend> Session<B> {
     /// Starts streaming from the backend's capture source to every output.
     ///
     /// Returns immediately; streams open on their own threads. A device that
     /// fails to open, or fails later, is reported as [`StreamState::Failed`]
-    /// in [`Session::output_status`] without affecting the other outputs.
+    /// (with its error) in [`Session::output_status`] without affecting the
+    /// other outputs.
     ///
     /// # Errors
     ///
     /// Returns an error when a thread cannot be spawned.
-    pub fn start<B: Backend>(
+    pub fn start(
         backend: &Arc<B>,
         sample_rate: SampleRate,
         configs: &[OutputConfig],
     ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
-        let capture_state = Arc::new(StateCell::new());
-        let mut session = Self {
-            stop: Arc::clone(&stop),
-            capture_state: Arc::clone(&capture_state),
-            outputs: Vec::with_capacity(configs.len()),
-            threads: Vec::with_capacity(configs.len() + 1),
-        };
+        let capture = Arc::new(CaptureShared::default());
+        let (new_outputs, new_output_rx) = mpsc::channel();
 
-        let mut producers = Vec::with_capacity(configs.len());
-        for config in configs {
-            let controls = Arc::new(OutputControls::new(config));
-            let (producer, consumer) = RingBuffer::new(QUEUE_FRAMES);
-            producers.push((producer, Arc::clone(&controls)));
-            session
-                .outputs
-                .push((config.id.clone(), Arc::clone(&controls)));
-
+        let capture_thread = {
             let backend = Arc::clone(backend);
             let stop = Arc::clone(&stop);
-            let id = config.id.clone();
-            let handle = thread::Builder::new()
-                .name(format!("render {id}"))
+            let capture = Arc::clone(&capture);
+            thread::Builder::new()
+                .name("capture".into())
                 .spawn(move || {
-                    let state = match render_thread(
-                        &*backend,
-                        &id,
-                        consumer,
-                        sample_rate,
-                        &controls,
-                        &stop,
-                    ) {
-                        Ok(()) => StreamState::Stopped,
-                        Err(_) => StreamState::Failed,
-                    };
-                    controls.set_state(state);
-                })?;
-            session.threads.push(handle);
-        }
+                    let result = capture_thread(&*backend, &new_output_rx, &capture.state, &stop);
+                    finish(&capture.state, &capture.error, result);
+                })?
+        };
 
-        let backend = Arc::clone(backend);
-        let handle = thread::Builder::new()
-            .name("capture".into())
-            .spawn(move || {
-                let state = match capture_thread(
-                    &*backend,
-                    FanOut::new(producers),
-                    &capture_state,
-                    &stop,
-                ) {
-                    Ok(()) => StreamState::Stopped,
-                    Err(_) => StreamState::Failed,
-                };
-                capture_state.set(state);
-            })?;
-        session.threads.push(handle);
+        let mut session = Self {
+            backend: Arc::clone(backend),
+            sample_rate,
+            stop,
+            capture,
+            capture_thread: Some(capture_thread),
+            new_outputs,
+            outputs: Vec::with_capacity(configs.len()),
+        };
+        for config in configs {
+            session.add_output(config)?;
+        }
         Ok(session)
+    }
+
+    /// Starts playing on one more device; replaces it if it is already present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the render thread cannot be spawned.
+    pub fn add_output(&mut self, config: &OutputConfig) -> std::io::Result<()> {
+        self.remove_output(&config.id);
+        let controls = Arc::new(OutputControls::new(config));
+        let (producer, consumer) = RingBuffer::new(QUEUE_FRAMES);
+
+        let backend = Arc::clone(&self.backend);
+        let stop = Arc::clone(&self.stop);
+        let thread_controls = Arc::clone(&controls);
+        let id = config.id.clone();
+        let sample_rate = self.sample_rate;
+        let thread = thread::Builder::new()
+            .name(format!("render {id}"))
+            .spawn(move || {
+                let result = render_thread(
+                    &*backend,
+                    &id,
+                    consumer,
+                    sample_rate,
+                    &thread_controls,
+                    &stop,
+                );
+                if let Err(error) = result {
+                    thread_controls.set_error(error.to_string());
+                    thread_controls.set_state(StreamState::Failed);
+                } else {
+                    thread_controls.set_state(StreamState::Stopped);
+                }
+            })?;
+
+        // A closed channel means the capture thread has ended; the output then
+        // simply receives no audio, and the capture failure is reported.
+        let _ = self.new_outputs.send((producer, Arc::clone(&controls)));
+        self.outputs.push(OutputHandle {
+            id: config.id.clone(),
+            controls,
+            thread: Some(thread),
+        });
+        Ok(())
+    }
+
+    /// Stops playing on a device. Returns `false` when it is not in the session.
+    pub fn remove_output(&mut self, id: &DeviceId) -> bool {
+        let Some(index) = self.outputs.iter().position(|o| &o.id == id) else {
+            return false;
+        };
+        let mut output = self.outputs.remove(index);
+        output.controls.request_stop();
+        if let Some(thread) = output.thread.take() {
+            // A panicked render thread has already stopped; nothing to recover.
+            let _ = thread.join();
+        }
+        // Its queue is now abandoned and pruned by the capture thread.
+        true
+    }
+
+    /// The devices in this session, in the order they were added.
+    #[must_use]
+    pub fn output_ids(&self) -> Vec<DeviceId> {
+        self.outputs.iter().map(|o| o.id.clone()).collect()
     }
 
     /// State of the capture stream.
     #[must_use]
     pub fn capture_state(&self) -> StreamState {
-        self.capture_state.get()
+        self.capture.state.get()
     }
 
-    /// Health of every output, in configuration order.
+    /// Why the capture stream failed, if it did.
+    #[must_use]
+    pub fn capture_error(&self) -> Option<String> {
+        lock(&self.capture.error).clone()
+    }
+
+    /// Health of every output, in the order they were added.
     #[must_use]
     pub fn output_status(&self) -> Vec<OutputStatus> {
         self.outputs
             .iter()
-            .map(|(id, c)| OutputStatus {
-                id: id.clone(),
-                state: c.state(),
-                underruns: c.underruns(),
-                overruns: c.overruns(),
-                trims: c.trims(),
+            .map(|o| OutputStatus {
+                id: o.id.clone(),
+                state: o.controls.state(),
+                underruns: o.controls.underruns(),
+                overruns: o.controls.overruns(),
+                trims: o.controls.trims(),
+                error: o.controls.error(),
             })
             .collect()
     }
@@ -141,9 +209,9 @@ impl Session {
     }
 
     fn with_output(&self, id: &DeviceId, apply: impl FnOnce(&OutputControls)) -> bool {
-        match self.outputs.iter().find(|(known, _)| known == id) {
-            Some((_, controls)) => {
-                apply(controls);
+        match self.outputs.iter().find(|o| &o.id == id) {
+            Some(output) => {
+                apply(&output.controls);
                 true
             }
             None => false,
@@ -152,22 +220,41 @@ impl Session {
 
     fn shutdown(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        for handle in self.threads.drain(..) {
+        let threads = self
+            .outputs
+            .iter_mut()
+            .filter_map(|o| o.thread.take())
+            .chain(self.capture_thread.take());
+        for thread in threads {
             // A panicked stream thread has already stopped; nothing to recover.
-            let _ = handle.join();
+            let _ = thread.join();
         }
     }
 }
 
-impl Drop for Session {
+impl<B: Backend> Drop for Session<B> {
     fn drop(&mut self) {
         self.shutdown();
     }
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn finish<E: Display>(state: &StateCell, error: &Mutex<Option<String>>, result: Result<(), E>) {
+    match result {
+        Ok(()) => state.set(StreamState::Stopped),
+        Err(e) => {
+            *lock(error) = Some(e.to_string());
+            state.set(StreamState::Failed);
+        }
+    }
+}
+
 fn capture_thread<B: Backend>(
     backend: &B,
-    mut fan_out: FanOut,
+    new_outputs: &Receiver<NewOutput>,
     state: &StateCell,
     stop: &AtomicBool,
 ) -> Result<(), B::Error> {
@@ -175,7 +262,12 @@ fn capture_thread<B: Backend>(
     let mut capture = backend.open_capture()?;
     capture.start()?;
     state.set(StreamState::Running);
+    let mut fan_out = FanOut::new(Vec::new());
     while !stop.load(Ordering::Relaxed) {
+        // Rare and cheap: only when an output is added.
+        for (producer, controls) in new_outputs.try_iter() {
+            fan_out.add(producer, controls);
+        }
         let frames = capture.read(WAIT_TIMEOUT_MS)?;
         fan_out.push(frames);
     }
@@ -203,7 +295,7 @@ fn render_thread<B: Backend>(
     );
     render.start()?;
     controls.set_state(StreamState::Running);
-    while !stop.load(Ordering::Relaxed) {
+    while !stop.load(Ordering::Relaxed) && !controls.stop_requested() {
         if !render.wait(WAIT_TIMEOUT_MS) {
             continue;
         }

@@ -1,10 +1,15 @@
 use std::io;
+use std::time::{Duration, Instant};
 
 use stereo_bt_core::{DeviceId, DeviceInfo};
 
 use crate::{
-    EngineConfig, MuteJournal, OutputConfig, OutputStatus, Platform, Session, StreamState,
+    Backend, EngineConfig, MuteJournal, OutputConfig, OutputStatus, Platform, Session, StreamState,
 };
+
+/// How long a failed device or capture stream waits before it is retried.
+/// Bluetooth devices often need a moment after a dropout or profile switch.
+pub(crate) const RETRY_DELAY: Duration = Duration::from_secs(3);
 
 /// Errors from supervising the routing.
 #[derive(Debug, thiserror::Error)]
@@ -28,6 +33,8 @@ pub struct EngineStatus {
     pub muted: Vec<DeviceId>,
     /// Capture stream state, when a session runs.
     pub capture: Option<StreamState>,
+    /// Why the capture stream failed, if it did.
+    pub capture_error: Option<String>,
     /// Per-output health of the current session.
     pub outputs: Vec<OutputStatus>,
     /// Sessions started so far (each device-set or source change starts one).
@@ -36,10 +43,24 @@ pub struct EngineStatus {
     pub devices: Vec<DeviceInfo>,
 }
 
-struct ActiveSession {
-    session: Session,
+struct ActiveSession<B: Backend> {
+    session: Session<B>,
     source: DeviceId,
-    outputs: Vec<DeviceId>,
+    /// When each currently failed output was first seen failing.
+    failed_since: Vec<(DeviceId, Instant)>,
+    /// When the capture stream was first seen failing.
+    capture_failed_since: Option<Instant>,
+}
+
+impl<B: Backend> ActiveSession<B> {
+    fn new(session: Session<B>, source: DeviceId) -> Self {
+        Self {
+            session,
+            source,
+            failed_since: Vec::new(),
+            capture_failed_since: None,
+        }
+    }
 }
 
 /// Keeps the running session, the source device and its mute in line with the
@@ -47,14 +68,16 @@ struct ActiveSession {
 ///
 /// Every change funnels into one `reconcile` step that derives the desired
 /// state and applies only the differences, so device events, configuration
-/// changes and start/stop all behave consistently. Single-threaded: owned by
+/// changes and start/stop all behave consistently. Adding or removing a
+/// device never disturbs the others; only a new source restarts everything.
+/// [`Supervisor::maintain`] retries failed streams. Single-threaded: owned by
 /// the engine thread.
 pub struct Supervisor<P: Platform, J: MuteJournal> {
     platform: P,
     journal: J,
     config: EngineConfig,
     running: bool,
-    active: Option<ActiveSession>,
+    active: Option<ActiveSession<P::Backend>>,
     muted_by_us: Vec<DeviceId>,
     session_starts: u64,
     devices: Vec<DeviceInfo>,
@@ -129,6 +152,51 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
         self.reconcile()
     }
 
+    /// Periodic upkeep (call every ~100 ms): restarts outputs that failed
+    /// while their device is present, and the whole session when capture
+    /// failed, each after [`RETRY_DELAY`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SupervisorError`] when devices cannot be queried or controlled.
+    pub fn maintain(&mut self, now: Instant) -> Result<(), SupervisorError> {
+        let Some(active) = self.active.as_mut() else {
+            return Ok(());
+        };
+        if active.session.capture_state() == StreamState::Failed {
+            let since = *active.capture_failed_since.get_or_insert(now);
+            if now.duration_since(since) >= RETRY_DELAY {
+                self.active = None;
+                return self.reconcile();
+            }
+            return Ok(());
+        }
+
+        let failed: Vec<DeviceId> = active
+            .session
+            .output_status()
+            .into_iter()
+            .filter(|o| o.state == StreamState::Failed)
+            .map(|o| o.id)
+            .collect();
+        active.failed_since.retain(|(id, _)| failed.contains(id));
+        for id in failed {
+            let Some(&(_, since)) = active.failed_since.iter().find(|(known, _)| known == &id)
+            else {
+                active.failed_since.push((id, now));
+                continue;
+            };
+            if now.duration_since(since) < RETRY_DELAY {
+                continue;
+            }
+            active.failed_since.retain(|(known, _)| known != &id);
+            if let Some(config) = self.config.outputs.iter().find(|o| o.id == id) {
+                active.session.add_output(config).map_err(spawn_error)?;
+            }
+        }
+        Ok(())
+    }
+
     /// A snapshot for the UI.
     #[must_use]
     pub fn status(&self) -> EngineStatus {
@@ -137,6 +205,7 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             source: self.active.as_ref().map(|a| a.source.clone()),
             muted: self.muted_by_us.clone(),
             capture: self.active.as_ref().map(|a| a.session.capture_state()),
+            capture_error: self.active.as_ref().and_then(|a| a.session.capture_error()),
             outputs: self
                 .active
                 .as_ref()
@@ -212,31 +281,30 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             return Ok(());
         }
 
-        let restart = self.active.as_ref().is_none_or(|active| {
-            let added = desired.iter().any(|o| !active.outputs.contains(&o.id));
-            // A device that disappeared keeps the session running for the others;
-            // only a device the user deselected forces a restart.
-            let deselected = active
-                .outputs
-                .iter()
-                .any(|id| present(id) && !desired.iter().any(|o| &o.id == id));
-            active.source != source || added || deselected
-        });
-        if restart {
-            // Release the old streams before opening devices again.
+        let Some(active) = self.active.as_mut().filter(|a| a.source == source) else {
+            // New source: release the old streams before opening devices again.
             self.active = None;
             let session = Session::start(
                 self.platform.backend(),
                 self.platform.sample_rate(),
                 &desired,
             )
-            .map_err(|error| SupervisorError::Platform(Box::new(error)))?;
+            .map_err(spawn_error)?;
             self.session_starts += 1;
-            self.active = Some(ActiveSession {
-                session,
-                source,
-                outputs: desired.into_iter().map(|o| o.id).collect(),
-            });
+            self.active = Some(ActiveSession::new(session, source));
+            return Ok(());
+        };
+
+        // Same source: change only the devices that differ, so the others
+        // keep playing undisturbed.
+        for id in active.session.output_ids() {
+            if !desired.iter().any(|o| o.id == id) {
+                active.session.remove_output(&id);
+            }
+        }
+        let current = active.session.output_ids();
+        for config in desired.iter().filter(|o| !current.contains(&o.id)) {
+            active.session.add_output(config).map_err(spawn_error)?;
         }
         Ok(())
     }
@@ -251,14 +319,18 @@ impl<P: Platform, J: MuteJournal> Drop for Supervisor<P, J> {
     }
 }
 
-fn apply_live(session: &Session, output: &OutputConfig) {
-    // Devices not in the session are handled by the restart in `reconcile`.
+fn apply_live<B: Backend>(session: &Session<B>, output: &OutputConfig) {
+    // Devices not in the session are added by `reconcile`.
     let _ = session.set_delay(&output.id, output.delay);
     let _ = session.set_volume(&output.id, output.volume);
     let _ = session.set_channel_mode(&output.id, output.channel_mode);
 }
 
 fn platform_error(error: impl std::error::Error + Send + Sync + 'static) -> SupervisorError {
+    SupervisorError::Platform(Box::new(error))
+}
+
+fn spawn_error(error: io::Error) -> SupervisorError {
     SupervisorError::Platform(Box::new(error))
 }
 
@@ -516,6 +588,95 @@ mod tests {
         s.devices_changed().unwrap();
 
         assert_eq!(s.status().devices.len(), 2);
+    }
+
+    fn wait_for(s: &TestSupervisor, what: &str, condition: impl Fn(&EngineStatus) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !condition(&s.status()) {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn state_of(status: &EngineStatus, raw: &str) -> Option<StreamState> {
+        status
+            .outputs
+            .iter()
+            .find(|o| o.id == id(raw))
+            .map(|o| o.state)
+    }
+
+    #[test]
+    fn enabling_a_device_adds_it_without_reopening_the_others() {
+        let w = world("A", &["A", "B", "C"]);
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["B"], false)).unwrap();
+        wait_for(&s, "B running", |st| {
+            state_of(st, "B") == Some(StreamState::Running)
+        });
+
+        s.update(config(&["B", "C"], false)).unwrap();
+
+        wait_for(&s, "C running", |st| {
+            state_of(st, "C") == Some(StreamState::Running)
+        });
+        assert_eq!(s.status().session_starts, 1);
+        assert_eq!(
+            lock(&w)
+                .render_opens
+                .iter()
+                .filter(|o| *o == &id("B"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn f6_failed_device_reports_its_error_and_is_retried_after_backoff() {
+        let w = world("A", &["A", "B", "C"]);
+        lock(&w).failing.insert(id("C"));
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["B", "C"], false)).unwrap();
+        wait_for(&s, "C failed", |st| {
+            state_of(st, "C") == Some(StreamState::Failed)
+        });
+        let error = s.status().outputs[1].error.clone();
+        assert_eq!(error.as_deref(), Some("fake error"));
+
+        lock(&w).failing.clear();
+        let now = Instant::now();
+        s.maintain(now).unwrap();
+        s.maintain(now + RETRY_DELAY / 2).unwrap();
+        assert_eq!(state_of(&s.status(), "C"), Some(StreamState::Failed));
+        s.maintain(now + RETRY_DELAY).unwrap();
+
+        wait_for(&s, "C running again", |st| {
+            state_of(st, "C") == Some(StreamState::Running)
+        });
+        assert_eq!(state_of(&s.status(), "B"), Some(StreamState::Running));
+        assert_eq!(s.status().session_starts, 1);
+    }
+
+    #[test]
+    fn failed_capture_restarts_the_session_after_backoff() {
+        let w = world("A", &["A", "B"]);
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["B"], false)).unwrap();
+        lock(&w).capture_failing = true;
+        wait_for(&s, "capture failed", |st| {
+            st.capture == Some(StreamState::Failed)
+        });
+        assert_eq!(s.status().capture_error.as_deref(), Some("fake error"));
+
+        lock(&w).capture_failing = false;
+        let now = Instant::now();
+        s.maintain(now).unwrap();
+        s.maintain(now + RETRY_DELAY).unwrap();
+
+        assert_eq!(s.status().session_starts, 2);
+        wait_for(&s, "capture running", |st| {
+            st.capture == Some(StreamState::Running)
+        });
     }
 
     #[test]

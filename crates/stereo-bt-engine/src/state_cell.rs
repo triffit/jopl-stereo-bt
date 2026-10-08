@@ -6,6 +6,12 @@ use crate::StreamState;
 #[derive(Debug)]
 pub(crate) struct StateCell(AtomicU8);
 
+impl Default for StateCell {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StateCell {
     pub(crate) const fn new() -> Self {
         Self(AtomicU8::new(to_u8(StreamState::Starting)))

@@ -105,10 +105,14 @@ struct FakeBackend {
 }
 
 impl FakeBackend {
+    /// Everything written to `id` so far; empty while it has not opened yet.
     fn written(&self, id: &DeviceId) -> Vec<Frame> {
         let outputs = self.outputs.lock().unwrap();
-        let (_, written) = outputs.iter().find(|(known, _)| known == id).unwrap();
-        written.lock().unwrap().clone()
+        outputs
+            .iter()
+            .find(|(known, _)| known == id)
+            .map(|(_, written)| written.lock().unwrap().clone())
+            .unwrap_or_default()
     }
 }
 
@@ -229,6 +233,61 @@ fn f1_f2_stereo_pair_receives_left_and_right_without_gaps() {
             "right device gap at {i}: {pair:?}"
         );
     }
+}
+
+/// Asserts `frames` (audible only) is one continuous ramp of mono `sign` values.
+fn assert_continuous(frames: &[Frame], sign: f32) {
+    for (i, pair) in frames.windows(2).enumerate() {
+        let x = pair[0].left;
+        assert!(x * sign > 0.0, "frame {i} from the wrong channel");
+        assert!(close(pair[0].right, x), "frame {i} not mono");
+        assert!(close(pair[1].left, x + sign), "gap at {i}: {pair:?}");
+    }
+}
+
+#[test]
+fn adding_a_device_while_streaming_leaves_the_others_uninterrupted() {
+    let backend = Arc::new(FakeBackend::default());
+    let mut session = Session::start(
+        &backend,
+        SampleRate::HZ_48000,
+        &[config("left", ChannelMode::LeftOnly)],
+    )
+    .unwrap();
+    wait_until(|| audible(&backend.written(&id("left"))).len() >= 2_400);
+
+    session
+        .add_output(&config("right", ChannelMode::RightOnly))
+        .unwrap();
+    wait_until(|| {
+        backend.outputs.lock().unwrap().len() == 2
+            && audible(&backend.written(&id("right"))).len() >= 2_400
+    });
+    session.stop();
+
+    assert_continuous(&audible(&backend.written(&id("left"))), 1.0);
+    assert_continuous(&audible(&backend.written(&id("right"))), -1.0);
+}
+
+#[test]
+fn removing_a_device_stops_only_that_device() {
+    let backend = Arc::new(FakeBackend::default());
+    let mut session = Session::start(
+        &backend,
+        SampleRate::HZ_48000,
+        &[
+            config("a", ChannelMode::Stereo),
+            config("b", ChannelMode::Stereo),
+        ],
+    )
+    .unwrap();
+    wait_until(|| backend.outputs.lock().unwrap().len() == 2);
+
+    assert!(session.remove_output(&id("b")));
+
+    assert_eq!(session.output_ids(), vec![id("a")]);
+    assert!(!session.remove_output(&id("b")));
+    session.stop();
 }
 
 #[test]

@@ -1,4 +1,5 @@
-use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 use stereo_bt_core::{ChannelMode, Delay, Volume};
 
@@ -17,6 +18,9 @@ pub(crate) struct OutputControls {
     underruns: AtomicU64,
     trims: AtomicU64,
     overruns: AtomicU64,
+    stop: AtomicBool,
+    /// Set once, when the render thread fails; never touched on the audio path.
+    error: Mutex<Option<String>>,
 }
 
 impl OutputControls {
@@ -29,6 +33,8 @@ impl OutputControls {
             underruns: AtomicU64::new(0),
             trims: AtomicU64::new(0),
             overruns: AtomicU64::new(0),
+            stop: AtomicBool::new(false),
+            error: Mutex::new(None),
         }
     }
 
@@ -74,6 +80,26 @@ impl OutputControls {
 
     pub(crate) fn add_overrun(&self) {
         self.overruns.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Asks this output's render thread to finish.
+    pub(crate) fn request_stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+
+    pub(crate) fn stop_requested(&self) -> bool {
+        self.stop.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn set_error(&self, error: String) {
+        *self.error.lock().unwrap_or_else(PoisonError::into_inner) = Some(error);
+    }
+
+    pub(crate) fn error(&self) -> Option<String> {
+        self.error
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     pub(crate) fn underruns(&self) -> u64 {

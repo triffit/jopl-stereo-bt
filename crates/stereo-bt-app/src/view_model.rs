@@ -41,7 +41,7 @@ pub(crate) struct DeviceRow {
     pub(crate) is_source: bool,
     /// Checkbox state: for the source, whether it plays (include-default mode).
     pub(crate) checked: bool,
-    pub(crate) subtitle: &'static str,
+    pub(crate) subtitle: String,
     pub(crate) badge: Option<Badge>,
     pub(crate) channel_mode: ChannelMode,
     pub(crate) delay_ms: u16,
@@ -95,6 +95,25 @@ fn row(
 }
 
 fn describe(
+    device: &DeviceSettings,
+    is_source: bool,
+    present: bool,
+    settings: &Settings,
+    status: &EngineStatus,
+) -> (String, Option<Badge>) {
+    let (subtitle, badge) = describe_static(device, is_source, present, settings, status);
+    if let Some(error) = status
+        .outputs
+        .iter()
+        .find(|o| o.id == device.id && o.state == StreamState::Failed)
+        .and_then(|o| o.error.as_deref())
+    {
+        return (format!("Device error · retrying — {error}"), badge);
+    }
+    (subtitle.into(), badge)
+}
+
+fn describe_static(
     device: &DeviceSettings,
     is_source: bool,
     present: bool,
@@ -176,6 +195,9 @@ pub(crate) fn status_line(settings: &Settings, status: &EngineStatus) -> String 
             count => format!("{count} devices — select and start."),
         };
     }
+    if status.capture == Some(StreamState::Failed) {
+        return "Audio source unavailable · retrying…".into();
+    }
     let Some(source) = &status.source else {
         return "Waiting for devices…".into();
     };
@@ -199,6 +221,9 @@ pub(crate) fn status_line(settings: &Settings, status: &EngineStatus) -> String 
 
 /// The info-bar dot.
 pub(crate) fn status_kind(status: &EngineStatus) -> StatusKind {
+    if status.capture == Some(StreamState::Failed) {
+        return StatusKind::Waiting;
+    }
     match (status.running, status.outputs.is_empty()) {
         (false, _) => StatusKind::Idle,
         (true, false) => StatusKind::Streaming,
@@ -249,6 +274,7 @@ mod tests {
                 underruns,
                 overruns: 0,
                 trims: 0,
+                error: (state == StreamState::Failed).then(|| "device unplugged".to_owned()),
             })
             .collect();
     }
@@ -322,7 +348,10 @@ mod tests {
 
         assert_eq!(badge_text(&rows[1]), Some("Synced"));
         assert_eq!(badge_text(&rows[2]), Some("Error"));
-        assert_eq!(rows[2].subtitle, "Device error");
+        assert_eq!(
+            rows[2].subtitle,
+            "Device error · retrying — device unplugged"
+        );
     }
 
     #[test]
@@ -341,6 +370,19 @@ mod tests {
             "Streaming from Device A to 1 device · 3 dropouts"
         );
         assert_eq!(status_kind(&status), StatusKind::Streaming);
+    }
+
+    #[test]
+    fn failed_capture_is_shown_as_retrying() {
+        let (settings, mut status) = setup(&["B"]);
+        running(&mut status, &[("B", StreamState::Running, 0)]);
+        status.capture = Some(StreamState::Failed);
+
+        assert_eq!(
+            status_line(&settings, &status),
+            "Audio source unavailable · retrying…"
+        );
+        assert_eq!(status_kind(&status), StatusKind::Waiting);
     }
 
     #[test]
