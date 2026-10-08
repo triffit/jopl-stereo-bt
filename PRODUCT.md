@@ -1,0 +1,131 @@
+# PRODUCT.md — jopl-stereo-bt (working name: StereoBT)
+
+## Pitch
+
+Play system audio through multiple Bluetooth earbuds, headphones and speakers at once —
+with per-device sync delay, true stereo split across two devices, and zero virtual drivers.
+A native Windows 11 app written in Rust, inspired by
+[WaveSync](https://indalsingh.dev/wavesync) ([source](https://github.com/Indal-Singh/WaveSync), MIT).
+
+## Problem
+
+Windows routes audio to exactly one output device. Two people sharing one laptop with two
+Bluetooth headsets, or two cheap Bluetooth speakers used as a stereo pair, are not supported.
+Existing workarounds (Stereo Mix, VB-Cable, Voicemeeter) need virtual drivers, are fiddly,
+and do not compensate for the different latency of each Bluetooth device.
+
+## Target users
+
+- Two people watching/listening on one PC, each with their own headset.
+- Users pairing two Bluetooth speakers as a left/right stereo set.
+- Small rooms: PC speakers plus a Bluetooth speaker, kept in sync.
+
+## Core features (v1)
+
+| # | Feature | Notes |
+|---|---------|-------|
+| F1 | Multi-device output | Any active render endpoint: Bluetooth, USB, 3.5 mm, HDMI. |
+| F2 | Stereo split | Per device channel mode: **Stereo**, **Left only**, **Right only**, **Mono mix**. Two devices = one stereo pair. |
+| F3 | Per-device sync delay | 0–500 ms slider, 1 ms steps, plus fine ±1 ms nudge buttons. |
+| F4 | Per-device volume | 0–100 %, independent of the Windows master volume. |
+| F5 | One-click Start/Stop | Global toggle; also from the tray and a global hotkey. |
+| F6 | Hot-plug | Device removal does not stop others; reconnect resumes automatically. |
+| F7 | Tray mode | Keeps streaming when the window is closed; tray menu for start/stop/quit. |
+| F8 | Profiles | Remember device set, channel mode, delay and volume per device ID. |
+| F9 | Clock-drift correction | Adaptive resampling per output so devices do not drift apart over long sessions (WaveSync does not do this). |
+
+## Later (v2+)
+
+- Assisted sync: play a click track, user taps when heard, delay is suggested.
+- Automatic latency measurement via microphone.
+- Per-app capture (process loopback, Windows 10 2004+) instead of whole-system audio.
+- Auto-start with Windows; portable build.
+
+## Non-goals
+
+- No virtual audio driver, no kernel components.
+- No macOS/Linux.
+- No audio effects/EQ beyond volume and channel mapping.
+- No Bluetooth pairing UI (use Windows Settings).
+
+## UX
+
+- Native Windows 11 Fluent look, **dark mode** (follow system theme later), Mica backdrop.
+- Single window: list of device cards (name, type icon, connected state, channel mode,
+  delay slider, volume slider, enable toggle), big Start/Stop button, status bar with
+  buffer health.
+- Keyboard-first and accessible: full tab order, arrow keys on sliders, screen-reader names.
+
+## Architecture
+
+```
+WASAPI loopback (default render endpoint, 48 kHz f32 stereo)
+        │ capture thread
+        ▼
+  fan-out ──► SPSC ring ──► [delay line → channel map → volume → drift resampler] ──► WASAPI render (device A)
+          ──► SPSC ring ──► [ ... ]                                                ──► WASAPI render (device B)
+```
+
+- **Real-time rule:** render threads do no heap allocation, no locks, no I/O, no logging.
+  MMCSS "Pro Audio" thread priority.
+- **Default device:** always the loopback source. Setting **"Include default device in sync
+  set"** (default **off**): off = default device is muted while streaming and only the
+  selected devices play; on = default device plays undelayed and is a member of the set
+  (other devices are delayed relative to it).
+- **Device events:** `IMMNotificationClient` → event channel → engine supervisor restarts
+  only the affected pipeline.
+
+### Crates (Cargo workspace)
+
+| Crate | Responsibility | Depends on Windows? |
+|-------|----------------|---------------------|
+| `crates/stereo-bt-core` | DSP: delay line, channel mapping, volume, drift controller, config/profile model, validation. Pure Rust, fully unit/property tested. | No |
+| `crates/stereo-bt-wasapi` | Capture/render streams, device enumeration, notifications. | Yes |
+| `crates/stereo-bt-engine` | Pipeline orchestration, supervisor, state machine (Stopped/Starting/Running/Degraded). | Via trait only (testable with fakes) |
+| `app` | UI, tray, settings persistence. Thin: UI events → engine commands. | Yes |
+
+### Key dependencies
+
+- `wasapi` (WASAPI wrapper) + `windows` (COM, `IMMNotificationClient`, MMCSS).
+- `rtrb` (lock-free SPSC ring buffer), `rubato` (resampling).
+- `thiserror` in libraries, `anyhow` only in `app`; `tracing` for logging (never on the RT path).
+- `tray-icon`, `serde` + `toml` for profiles in `%APPDATA%`.
+
+### UI toolkit — Slint (`fluent-dark` style)
+
+Pure Rust, native rendering (no WebView), small binary, built-in Fluent widgets. Mica backdrop
+via a small `windows` call. Rejected: Tauri (WebView2, not native) and WinUI 3 (immature Rust
+XAML bindings).
+
+Used under the **Slint Royalty-free Desktop License 2.0** (free for desktop apps). Obligations:
+
+- Show the `AboutSlint` widget in the app's About dialog (reachable from the main menu/tray),
+  **or** show the Slint badge on the public download page. We do the About dialog.
+- Do not redistribute Slint on its own or expose Slint APIs from our app.
+- Keep Slint's licence notices intact.
+
+## Quality bar
+
+- `#![forbid(unsafe_code)]` everywhere except the narrowly-scoped WASAPI/COM crate (audited,
+  documented `unsafe` only where the `windows` crate requires it).
+- TDD: core DSP covered by unit + property tests (e.g. "delay of N ms shifts output by exactly
+  N × 48 samples", "Left-only never leaks right channel"); engine tested with fake devices.
+- Zero compiler/clippy warnings, `cargo fmt` clean.
+- Targets: < 1 % CPU, < 30 MB RAM, no audible glitches over a 2-hour session with two
+  Bluetooth devices.
+
+## Platform
+
+Windows 11 x64 (Windows 10 22H2 best-effort). Distributed as a signed MSIX or MSI.
+
+## Success criteria
+
+1. Two Bluetooth headsets play the same video audio, perceived in sync after delay tuning.
+2. Two Bluetooth speakers act as left/right stereo pair.
+3. Unplugging/turning off one device never interrupts the other; reconnect resumes within 3 s.
+4. No drift audible after 2 hours of continuous playback.
+
+## Licence
+
+Personal project, **MIT** — Copyright (c) 2026 JOPL, Triffit (see `LICENSE`). Third-party: Slint under its Royalty-free Desktop License 2.0
+(see UI toolkit); other dependencies MIT/Apache-2.0 compatible.
