@@ -23,4 +23,7 @@ pub enum Error {
         /// The rejected value in hertz.
         hz: u32,
     },
+    /// A device identifier is empty, too long or contains control characters.
+    #[error("invalid device identifier")]
+    InvalidDeviceId,
 }

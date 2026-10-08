@@ -5,8 +5,20 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 ## Layout
 
 - Cargo workspace, edition 2024, `rust-version = "1.98"`.
-- `crates/stereo-bt-core` — platform-independent DSP and config model (no Windows deps).
-- Planned: `crates/stereo-bt-wasapi`, `crates/stereo-bt-engine`, `app` (Slint `fluent-dark`).
+- `crates/stereo-bt-core` — platform-independent DSP, PCM conversion and device model
+  (no Windows deps).
+- `crates/stereo-bt-wasapi` — thin adapter over the `wasapi` crate (no own `unsafe`):
+  `ComGuard`, `list_output_devices`, `LoopbackCapture`, `RenderStream`, `DeviceWatcher`.
+  All streams 48 kHz f32 stereo, shared mode with Windows autoconvert.
+- Planned: `crates/stereo-bt-engine`, `app` (Slint `fluent-dark`).
+
+## WASAPI notes
+
+- Every thread using WASAPI holds a `ComGuard` (MTA). GUI threads are STA → use a
+  dedicated audio thread.
+- Loopback delivers no packets while nothing plays; `LoopbackCapture::read` returns an
+  empty slice on timeout.
+- Hardware smoke tests are `#[ignore]`d: `cargo test -p stereo-bt-wasapi -- --ignored`.
 
 ## Conventions
 

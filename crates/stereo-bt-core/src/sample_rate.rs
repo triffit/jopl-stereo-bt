@@ -9,6 +9,8 @@ impl SampleRate {
     pub const MIN_HZ: u32 = 8_000;
     /// Highest supported sample rate.
     pub const MAX_HZ: u32 = 384_000;
+    /// 48 kHz, the internal stream rate used on every endpoint.
+    pub const HZ_48000: Self = Self(48_000);
 
     /// Creates a sample rate.
     ///

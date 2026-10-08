@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/stereo-bt-core"]
+members = ["crates/stereo-bt-core", "crates/stereo-bt-wasapi"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,7 +11,9 @@ authors = ["JOPL", "Triffit"]
 publish = false
 
 [workspace.dependencies]
+stereo-bt-core = { path = "crates/stereo-bt-core" }
 thiserror = "2"
+wasapi = "0.25"
 proptest = "1"
 
 [workspace.lints.rust]
