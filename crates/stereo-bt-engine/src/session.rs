@@ -192,13 +192,15 @@ fn render_thread<B: Backend>(
 ) -> Result<(), B::Error> {
     let _guard = backend.enter_thread()?;
     let mut render = backend.open_render(id)?;
+    let mut block = vec![Frame::SILENCE; render.buffer_frames()];
     let mut pipeline = RenderPipeline::new(
         queue,
         Playout::new(CUSHION_FRAMES, MAX_EXCESS_FRAMES),
+        CUSHION_FRAMES,
+        block.len(),
         sample_rate,
         Arc::clone(controls),
     );
-    let mut block = vec![Frame::SILENCE; render.buffer_frames()];
     render.start()?;
     controls.set_state(StreamState::Running);
     while !stop.load(Ordering::Relaxed) {

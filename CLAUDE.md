@@ -35,7 +35,11 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - Tray (F7, `tray.rs`, `tray-icon` crate): polled on the UI timer; closing the window while
   streaming hides to tray, closing while stopped (or without a tray) quits. Event loop runs via
   `run_event_loop_until_quit`. Icon drawn in code (`icon.rs`).
-- Planned: resampling drift correction, Mica backdrop, `.ico` + installer.
+- Exe icon + version info: `build.rs` draws the icon with `src/icon.rs` (shared with the tray),
+  encodes it with `src/ico.rs` into `OUT_DIR/app.ico` and embeds it via `winresource`.
+- Window chrome: `ui::select_backend` uses Slint's `unstable-winit-030` hook (Slint pinned
+  `~1.18` because of it) for a dark navy title bar and the Mica backdrop; `Theme.background`
+  is slightly translucent. No installer: the exe is portable.
 
 ## Slint notes
 
@@ -54,8 +58,10 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - Every output keeps its queue at the same cushion (40 ms, `tuning.rs`); priming aligns to
   exactly the cushion, so base latency is equal for all outputs. The user delay is a
   separate `DelayLine` on top.
-- Drift: trim back to cushion beyond +30 ms; re-prime on underrun. Resampling (rubato)
-  is a later refinement.
+- Drift (F9): each `RenderPipeline` resamples with `DriftResampler` (4-point Catmull-Rom,
+  constant 3-frame latency) at a ratio from `DriftControl` (PI on the smoothed queue fill
+  error, ±0.2 % max, ~30 s settling), so the queue settles exactly at the cushion and no
+  sync offset builds up. Trim beyond +30 ms and re-prime on underrun remain as safety nets.
 - Never render to the loopback source (default device): feedback loop.
 - WASAPI loopback is captured **before** endpoint volume/mute (verified on hardware
   2026-10-08), so muting the default endpoint keeps the source audio.

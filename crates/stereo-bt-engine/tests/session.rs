@@ -5,6 +5,7 @@
 #![allow(clippy::unwrap_used)]
 
 use std::fmt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -14,6 +15,8 @@ use stereo_bt_engine::{Backend, CaptureStream, OutputConfig, RenderSink, Session
 
 const BLOCK: usize = 480;
 const MISSING: &str = "missing-device";
+/// The engine's queue cushion (40 ms at 48 kHz).
+const CUSHION: usize = 1_920;
 
 #[derive(Debug)]
 struct FakeError;
@@ -30,6 +33,7 @@ impl std::error::Error for FakeError {}
 struct FakeCapture {
     next: u32,
     block: Vec<Frame>,
+    produced: Arc<AtomicUsize>,
 }
 
 impl CaptureStream for FakeCapture {
@@ -47,13 +51,18 @@ impl CaptureStream for FakeCapture {
             let value = f32::from(u16::try_from(self.next % 60_000).unwrap());
             *frame = Frame::new(value, -value);
         }
+        self.produced.fetch_add(BLOCK, Ordering::Relaxed);
         Ok(&self.block)
     }
 }
 
-/// Render pulls faster than capture produces, so it never drops audio.
+/// Render behaves like a device on the same clock as the capture: it asks
+/// for a block only once that block plus the cushion has been produced, so
+/// it neither underruns nor lets the queue grow.
 struct FakeRender {
     written: Recording,
+    produced: Arc<AtomicUsize>,
+    rendered: usize,
 }
 
 impl RenderSink for FakeRender {
@@ -68,8 +77,12 @@ impl RenderSink for FakeRender {
     }
 
     fn wait(&mut self, _timeout_ms: u32) -> bool {
-        thread::sleep(Duration::from_millis(2));
-        true
+        if self.produced.load(Ordering::Relaxed) >= self.rendered + CUSHION + BLOCK {
+            true
+        } else {
+            thread::sleep(Duration::from_millis(1));
+            false
+        }
     }
 
     fn writable_frames(&mut self) -> Result<usize, FakeError> {
@@ -78,6 +91,7 @@ impl RenderSink for FakeRender {
 
     fn write(&mut self, frames: &[Frame]) -> Result<(), FakeError> {
         self.written.lock().unwrap().extend_from_slice(frames);
+        self.rendered += frames.len();
         Ok(())
     }
 }
@@ -87,6 +101,7 @@ type Recording = Arc<Mutex<Vec<Frame>>>;
 #[derive(Default)]
 struct FakeBackend {
     outputs: Mutex<Vec<(DeviceId, Recording)>>,
+    produced: Arc<AtomicUsize>,
 }
 
 impl FakeBackend {
@@ -111,6 +126,7 @@ impl Backend for FakeBackend {
         Ok(FakeCapture {
             next: 0,
             block: vec![Frame::SILENCE; BLOCK],
+            produced: Arc::clone(&self.produced),
         })
     }
 
@@ -123,7 +139,11 @@ impl Backend for FakeBackend {
             .lock()
             .unwrap()
             .push((id.clone(), Arc::clone(&written)));
-        Ok(FakeRender { written })
+        Ok(FakeRender {
+            written,
+            produced: Arc::clone(&self.produced),
+            rendered: 0,
+        })
     }
 }
 
@@ -131,12 +151,20 @@ fn id(raw: &str) -> DeviceId {
     DeviceId::new(raw).unwrap()
 }
 
+/// Frames clearly above silence; drops the drift resampler's tiny
+/// interpolation tail where playback starts.
 fn audible(frames: &[Frame]) -> Vec<Frame> {
     frames
         .iter()
         .copied()
-        .filter(|f| *f != Frame::SILENCE)
+        .filter(|f| f.left.abs() > 0.5 || f.right.abs() > 0.5)
         .collect()
+}
+
+/// The drift resampler may play a hair faster or slower, so consecutive ramp
+/// values differ by 1 within interpolation tolerance.
+fn close(a: f32, b: f32) -> bool {
+    (a - b).abs() < 0.01
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool) {
@@ -179,29 +207,26 @@ fn f1_f2_stereo_pair_receives_left_and_right_without_gaps() {
     // Left device plays (x, x) for x = 1, 2, 3, ...; right device (-x, -x).
     for (i, pair) in left.windows(2).enumerate() {
         let x = pair[0].left;
-        assert_eq!(
-            pair[0],
-            Frame::new(x, x),
+        assert!(x > 0.0, "left device frame {i} not from left channel");
+        assert!(
+            close(pair[0].right, x),
             "left device frame {i} not mono-left"
         );
-        assert_eq!(
-            pair[1],
-            Frame::new(x + 1.0, x + 1.0),
-            "left device gap at {i}"
+        assert!(
+            close(pair[1].left, x + 1.0),
+            "left device gap at {i}: {pair:?}"
         );
     }
     for (i, pair) in right.windows(2).enumerate() {
         let x = pair[0].right;
         assert!(x < 0.0, "right device frame {i} not from right channel");
-        assert_eq!(
-            pair[0],
-            Frame::new(x, x),
+        assert!(
+            close(pair[0].left, x),
             "right device frame {i} not mono-right"
         );
-        assert_eq!(
-            pair[1],
-            Frame::new(x - 1.0, x - 1.0),
-            "right device gap at {i}"
+        assert!(
+            close(pair[1].right, x - 1.0),
+            "right device gap at {i}: {pair:?}"
         );
     }
 }

@@ -32,14 +32,14 @@ and do not compensate for the different latency of each Bluetooth device.
 | F6 | Hot-plug | Device removal does not stop others; reconnect resumes automatically. |
 | F7 | Tray mode | Keeps streaming when the window is closed; tray menu for start/stop/quit. |
 | F8 | Profiles | Remember device set, channel mode, delay and volume per device ID. |
-| F9 | Clock-drift correction | Equal per-output queue cushion, trimmed when drift exceeds 30 ms (done); adaptive resampling per output for click-free correction (next). WaveSync has neither. |
+| F9 | Clock-drift correction | Equal per-output queue cushion plus click-free adaptive resampling (±0.2 %, inaudible) that keeps every queue at the cushion; trimming only as a safety net. WaveSync has neither. |
 
 ## Later (v2+)
 
 - Assisted sync: play a click track, user taps when heard, delay is suggested.
 - Automatic latency measurement via microphone.
 - Per-app capture (process loopback, Windows 10 2004+) instead of whole-system audio.
-- Auto-start with Windows; portable build.
+- Auto-start with Windows.
 
 ## Non-goals
 
@@ -123,7 +123,8 @@ Used under the **Slint Royalty-free Desktop License 2.0** (free for desktop apps
 
 ## Platform
 
-Windows 11 x64 (Windows 10 22H2 best-effort). Distributed as a signed MSIX or MSI.
+Windows 11 x64 (Windows 10 22H2 best-effort). Distributed as a single portable
+`jopl-stereo-bt.exe` (no installer); settings live in `%APPDATA%\JOPL-StereoBT`.
 
 ## Success criteria
 
