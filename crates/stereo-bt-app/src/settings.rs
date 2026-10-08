@@ -32,11 +32,22 @@ impl DeviceSettings {
 }
 
 /// Everything persisted between runs.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub(crate) struct Settings {
+    /// Whether the Windows default device keeps playing while streaming
+    /// (`false` mutes it, which needs a spare output device as the source).
     pub(crate) include_default: bool,
     pub(crate) devices: Vec<DeviceSettings>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            include_default: true,
+            devices: Vec::new(),
+        }
+    }
 }
 
 impl Settings {
@@ -150,6 +161,12 @@ mod tests {
         let text = toml::to_string(&settings).unwrap();
 
         assert_eq!(toml::from_str::<Settings>(&text).unwrap(), settings);
+    }
+
+    #[test]
+    fn default_device_keeps_playing_by_default() {
+        assert!(Settings::default().include_default);
+        assert!(Settings::default().engine_config().include_default);
     }
 
     #[test]

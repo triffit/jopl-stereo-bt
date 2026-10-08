@@ -300,13 +300,15 @@ mod tests {
     #[test]
     fn source_checkbox_shows_whether_it_plays() {
         let (mut settings, status) = setup(&[]);
-        assert!(!device_rows(&settings, &status)[0].checked);
-
-        settings.include_default = true;
-
         let rows = device_rows(&settings, &status);
         assert!(rows[0].checked);
         assert_eq!(rows[0].subtitle, "Default playback · plays natively");
+
+        settings.include_default = false;
+
+        let rows = device_rows(&settings, &status);
+        assert!(!rows[0].checked);
+        assert_eq!(rows[0].subtitle, "Default playback · muted while streaming");
     }
 
     #[test]

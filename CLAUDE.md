@@ -54,7 +54,8 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   custom accessible controls in `ui/controls.slint` (`AccentSlider` with arrow/PageUp/Home/End
   keys, `AccentCheckBox`, `Segmented`, `Pill`, `OutlineButton`, `GradientButton`). Std
   widgets only for `ScrollView` and `AboutSlint`.
-- The source (default) device's checkbox is the include-default toggle.
+- The source (default) device's checkbox is the include-default toggle; `Settings::default()`
+  has it **on** (default device keeps playing), muting is opt-in.
 
 ## Sync model
 

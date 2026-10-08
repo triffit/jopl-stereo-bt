@@ -68,11 +68,11 @@ WASAPI loopback (default render endpoint, 48 kHz f32 stereo)
 
 - **Real-time rule:** render threads do no heap allocation, no locks, no I/O, no logging.
   MMCSS "Pro Audio" thread priority.
-- **Default device:** always the loopback source. Setting **"Include default device in sync
-  set"** (default **off**): off = default device is muted while streaming and only the
-  selected devices play; on = default device plays undelayed and is a member of the set
-  (other devices are delayed relative to it).
-  Off is the better sync mode: every audible device is rendered by us, so any device can be
+- **Default device:** always the loopback source. Setting **"Keep default device playing"**
+  (default **on**, the default device's checkbox): on = default device keeps playing
+  undelayed and the other devices are delayed relative to it; off = default device is muted
+  while streaming and only the selected devices play.
+  Off (mute) is the better sync mode: every audible device is rendered by us, so any device can be
   delayed relative to any other. Loopback captures before endpoint mute (verified), so muting
   keeps the source. The previous mute state is restored on stop and after a crash.
   **Limitation:** mute mode needs a spare output device to act as the (muted) source, e.g. a
