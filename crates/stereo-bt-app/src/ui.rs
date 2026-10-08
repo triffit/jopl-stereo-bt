@@ -37,6 +37,7 @@ where
     E: EngineControl + 'static,
     S: SettingsStore + 'static,
 {
+    select_backend()?;
     let window = MainWindow::new()?;
     window.set_version(env!("CARGO_PKG_VERSION").into());
     let controller = Rc::new(RefCell::new(Controller::new(engine, store)));
@@ -116,6 +117,29 @@ where
             let _ = slint::quit_event_loop();
         }
     }
+}
+
+/// Uses the winit backend with a navy title bar and the Windows 11 Mica
+/// backdrop, which shows through the translucent window background.
+/// Older Windows versions ignore what they do not support and keep the solid look.
+fn select_backend() -> Result<(), slint::PlatformError> {
+    use slint::winit_030::winit::platform::windows::{
+        BackdropType, Color, WindowAttributesExtWindows,
+    };
+    use slint::winit_030::winit::window::Theme;
+
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .with_winit_window_attributes_hook(|attributes| {
+            attributes
+                .with_theme(Some(Theme::Dark))
+                // Match Theme.background / Theme.text instead of the user's accent color.
+                .with_title_background_color(Some(Color::from_rgb(0x0b, 0x0e, 0x1a)))
+                .with_title_text_color(Color::from_rgb(0xe7, 0xe9, 0xf3))
+                .with_system_backdrop(BackdropType::MainWindow)
+                .with_transparent(true)
+        })
+        .select()
 }
 
 /// Shows a fatal start-up error.

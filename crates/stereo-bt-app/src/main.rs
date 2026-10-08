@@ -7,6 +7,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod controller;
+// Used by build.rs to embed the exe icon; compiled here only for its tests.
+#[cfg(test)]
+mod ico;
 #[cfg(windows)]
 mod icon;
 mod settings;

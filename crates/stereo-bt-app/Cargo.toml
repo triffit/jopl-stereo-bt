@@ -25,6 +25,7 @@ tray-icon.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
+winresource.workspace = true
 
 [lints]
 workspace = true

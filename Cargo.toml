@@ -21,8 +21,9 @@ stereo-bt-engine = { path = "crates/stereo-bt-engine" }
 stereo-bt-wasapi = { path = "crates/stereo-bt-wasapi" }
 anyhow = "1"
 rtrb = "0.4"
-slint = "1.18"
+slint = { version = "~1.18", features = ["unstable-winit-030"] }
 slint-build = "1.18"
+winresource = "0.1"
 thiserror = "2"
 wasapi = "0.25"
 windows = { version = "0.62", features = [
