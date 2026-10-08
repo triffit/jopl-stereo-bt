@@ -4,6 +4,8 @@
 //! processing types ([`OutputChain`], [`DelayLine`], [`pcm`]) never allocate
 //! after construction, so they are safe to use on an audio render thread.
 
+#![forbid(unsafe_code)]
+
 mod channel_mode;
 mod delay;
 mod delay_line;

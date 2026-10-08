@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 rtrb.workspace = true
 stereo-bt-core.workspace = true
+thiserror.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 stereo-bt-wasapi.workspace = true

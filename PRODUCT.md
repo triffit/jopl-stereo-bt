@@ -75,6 +75,10 @@ WASAPI loopback (default render endpoint, 48 kHz f32 stereo)
   Off is the better sync mode: every audible device is rendered by us, so any device can be
   delayed relative to any other. Loopback captures before endpoint mute (verified), so muting
   keeps the source. The previous mute state is restored on stop and after a crash.
+  **Limitation:** mute mode needs a spare output device to act as the (muted) source, e.g. a
+  monitor's HDMI audio. With only two physical outputs, use include-default mode: the default
+  device plays natively and the other is delayed to match (this cannot split stereo across
+  both, since the default device always plays the full mix).
 - **Device events:** `IMMNotificationClient` → event channel → engine supervisor restarts
   only the affected pipeline.
 

@@ -276,6 +276,7 @@ dependencies = [
  "rtrb",
  "stereo-bt-core",
  "stereo-bt-wasapi",
+ "thiserror",
 ]
 
 [[package]]
@@ -285,6 +286,7 @@ dependencies = [
  "stereo-bt-core",
  "thiserror",
  "wasapi",
+ "windows",
 ]
 
 [[package]]

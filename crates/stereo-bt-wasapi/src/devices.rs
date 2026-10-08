@@ -33,3 +33,19 @@ pub fn list_output_devices() -> Result<Vec<DeviceInfo>, Error> {
     }
     Ok(devices)
 }
+
+/// The identifier of the current default output device, or `None` when there is none.
+///
+/// Requires a [`crate::ComGuard`] on the calling thread.
+///
+/// # Errors
+///
+/// Returns [`Error`] when the enumerator fails or reports an invalid identifier.
+pub fn default_output_id() -> Result<Option<DeviceId>, Error> {
+    let enumerator = DeviceEnumerator::new()?;
+    // No default device (nothing connected) is a normal state.
+    let Ok(device) = enumerator.get_default_device(&Direction::Render) else {
+        return Ok(None);
+    };
+    Ok(Some(DeviceId::new(device.get_id()?)?))
+}

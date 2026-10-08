@@ -20,10 +20,17 @@ stereo-bt-wasapi = { path = "crates/stereo-bt-wasapi" }
 rtrb = "0.4"
 thiserror = "2"
 wasapi = "0.25"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_System_Com",
+    "Win32_System_Threading",
+] }
 proptest = "1"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [workspace.lints.clippy]
@@ -31,3 +38,4 @@ pedantic = { level = "warn", priority = -1 }
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
+undocumented_unsafe_blocks = "warn"

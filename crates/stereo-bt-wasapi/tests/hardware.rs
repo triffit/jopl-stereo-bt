@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 use stereo_bt_core::Frame;
 use stereo_bt_wasapi::{
-    ComGuard, DeviceWatcher, LoopbackCapture, RenderStream, list_output_devices,
+    ComGuard, DeviceWatcher, LoopbackCapture, MmcssGuard, RenderStream, default_output_id,
+    is_muted, list_output_devices, set_muted,
 };
 
 #[test]
@@ -75,4 +76,35 @@ fn device_watcher_registers_and_unregisters() {
     let watcher = DeviceWatcher::start(&sender).unwrap();
 
     drop(watcher);
+}
+
+#[test]
+#[ignore = "needs an active audio output device"]
+fn default_output_id_matches_listed_default() {
+    let _com = ComGuard::init_mta().unwrap();
+
+    let default = default_output_id().unwrap().unwrap();
+
+    let listed = list_output_devices().unwrap();
+    assert!(listed.iter().any(|d| d.is_default && d.id == default));
+}
+
+#[test]
+#[ignore = "needs an active audio output device; rewrites its current mute state"]
+fn endpoint_mute_can_be_read_and_written_back_unchanged() {
+    let _com = ComGuard::init_mta().unwrap();
+    let default = default_output_id().unwrap().unwrap();
+
+    let muted = is_muted(&default).unwrap();
+    set_muted(&default, muted).unwrap();
+
+    assert_eq!(is_muted(&default).unwrap(), muted);
+}
+
+#[test]
+#[ignore = "needs the Windows MMCSS service"]
+fn thread_can_register_for_pro_audio_scheduling() {
+    let guard = MmcssGuard::pro_audio().unwrap();
+
+    drop(guard);
 }

@@ -7,16 +7,25 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - Cargo workspace, edition 2024, `rust-version = "1.98"`.
 - `crates/stereo-bt-core` — platform-independent DSP, PCM conversion and device model
   (no Windows deps).
-- `crates/stereo-bt-wasapi` — thin adapter over the `wasapi` crate (no own `unsafe`):
-  `ComGuard`, `list_output_devices`, `LoopbackCapture`, `RenderStream`, `DeviceWatcher`.
+- `crates/stereo-bt-wasapi` — thin adapter over the `wasapi` crate: `ComGuard`,
+  `list_output_devices`, `default_output_id`, `LoopbackCapture`, `RenderStream`,
+  `DeviceWatcher`, plus `is_muted`/`set_muted` and `MmcssGuard`. The **only** `unsafe` in the
+  workspace lives in `endpoint_mute.rs` and `mmcss.rs` (module-level `allow`, every block has
+  a `// SAFETY:` comment). Workspace lint is `unsafe_code = "deny"`; core and engine
+  `#![forbid(unsafe_code)]`.
   All streams 48 kHz f32 stereo, shared mode with Windows autoconvert.
 - `crates/stereo-bt-engine` — `Session`: one capture thread → `FanOut` (one `rtrb` SPSC
   queue per output) → one render thread per output running `RenderPipeline`
   (`Playout` policy + `OutputChain`). Platform behind `Backend` trait; `WasapiBackend`
   on Windows, fake backend in `tests/session.rs`. Live settings via lock-free atomics
   (`OutputControls`). Manual hardware check: `cargo run -p stereo-bt-engine --example route`.
-- Planned: supervisor (hot-plug restart, default-device mute, MMCSS), `app` (Slint
-  `fluent-dark`).
+- Engine control: `Supervisor` (single-threaded state machine; every change goes through
+  `reconcile()`: source = default device, mute it unless `include_default`, session = selected
+  ∩ present − source; restart only on source change, added or deselected device) behind
+  `Platform` + `MuteJournal` traits. `Engine` runs it on its own thread (commands with
+  replies, device events debounced 300 ms, status snapshot). Mutes are journaled *before*
+  muting and restored on stop, drop and next start (`FileMuteJournal`).
+- Planned: resampling drift correction, `app` (Slint `fluent-dark`).
 
 ## Sync model
 
