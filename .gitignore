@@ -1,0 +1,15 @@
+# Cargo build output
+/target/
+
+# Editors and IDEs
+.vs/
+.vscode/
+.idea/
+*.swp
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Local Claude Code settings
+.claude/settings.local.json
