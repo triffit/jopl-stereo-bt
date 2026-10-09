@@ -4725,6 +4725,7 @@ dependencies = [
  "stereo-bt-engine",
  "toml 1.1.7+spec-1.1.0",
  "tray-icon",
+ "windows",
  "winresource",
 ]
 

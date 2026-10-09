@@ -22,6 +22,7 @@ toml.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 tray-icon.workspace = true
+windows.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true

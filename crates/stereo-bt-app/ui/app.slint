@@ -2,9 +2,12 @@
 // three pages (Devices, Sync, Settings). Standard widgets (scroll bars,
 // About panel) use the Fluent dark style (build.rs).
 
-import { AboutSlint, ScrollView } from "std-widgets.slint";
+import { AboutSlint } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Card, CommandButton, Dot, Icon, InfoBar, NavItem, Segmented, Slider, SubtleButton, ToggleSwitch } from "controls.slint";
+
+// Rust sets the accent colour.
+export { Theme }
+import { Card, CommandButton, PageScrollBar, Dot, Icon, InfoBar, NavItem, Segmented, Slider, SubtleButton, ToggleSwitch } from "controls.slint";
 
 export struct DeviceRow {
     id: string,
@@ -865,15 +868,13 @@ export component MainWindow inherits Window {
         // Content.
         Rectangle {
             horizontal-stretch: 1;
-            background: Theme.page;
-            border-top-left-radius: Theme.radius;
-            border-width: 1px;
-            border-color: Theme.stroke;
 
-            ScrollView {
+            page-flick := Flickable {
                 // Wrap long texts instead of scrolling sideways.
-                content-width: self.visible-width;
-                VerticalLayout {
+                content-width: self.width;
+                content-height: page-content.preferred-height;
+                page-content := VerticalLayout {
+                    width: page-flick.width;
                     padding-left: 36px;
                     padding-right: 36px;
                     padding-top: 18px;
@@ -1135,6 +1136,15 @@ export component MainWindow inherits Window {
                     }
                     }
                 }
+            }
+
+            // A thin scrollbar as in Windows Settings; wider while pointed at.
+            if page-flick.content-height > page-flick.height: PageScrollBar {
+                x: parent.width - self.width;
+                height: parent.height;
+                flick-height: page-flick.height;
+                content-height: page-flick.content-height;
+                offset <=> page-flick.content-y;
             }
         }
     }

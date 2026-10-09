@@ -1,19 +1,22 @@
 // Windows 11 Fluent (dark) tokens for JOPL-StereoBT.
 
 export global Theme {
-    // Window: slightly translucent so the Mica backdrop shows through.
-    out property <brush> window: #202020e0;
-    out property <brush> page: #ffffff08;
+    // Transparent like Windows Settings, so the Mica backdrop (tinted by
+    // the wallpaper) shows through everywhere; cards float on it.
+    out property <brush> window: transparent;
     out property <brush> layer: #ffffff0d;
     out property <brush> layer-hover: #ffffff15;
-    out property <brush> stroke: #ffffff12;
+    // Card outlines: barely visible, as in Settings.
+    out property <brush> stroke: #0000001a;
     out property <brush> control: #ffffff0f;
     out property <brush> control-stroke: #ffffff18;
     out property <brush> text: #ffffff;
     out property <brush> text-2: #ffffffc8;
     out property <brush> text-3: #ffffff8b;
-    out property <color> accent: #4cc2ff;
-    out property <color> accent-hover: #47b1e8;
+    // The user's Windows accent (set from Rust at start-up); these are the
+    // Windows default dark-mode accent shades until then.
+    in-out property <color> accent: #4cc2ff;
+    in-out property <color> accent-hover: #47b1e8;
     out property <color> success: #6ccb5f;
     out property <color> caution: #fce100;
     out property <color> error: #ff99a4;

@@ -534,3 +534,48 @@ export component NavItem inherits Rectangle {
         }
     }
 }
+
+// A thin vertical scrollbar in the Windows 11 style: 3 px, 6 px while
+// pointed at or dragged. Bind `offset` to the Flickable's `content-y`;
+// the mouse wheel keeps scrolling the Flickable itself.
+export component PageScrollBar inherits Rectangle {
+    in property <length> flick-height;
+    in property <length> content-height;
+    // The Flickable's content-y: 0 at the top, negative further down.
+    in-out property <length> offset;
+
+    property <length> range: max(1px, root.content-height - root.flick-height);
+    property <length> thumb: max(32px, root.height * min(1, root.flick-height / root.content-height));
+    property <bool> wide: touch.has-hover || touch.pressed;
+
+    width: 14px;
+
+    Rectangle {
+        width: root.wide ? 6px : 3px;
+        x: parent.width - self.width - 3px;
+        y: (root.height - root.thumb) * clamp(-root.offset / root.range, 0, 1);
+        height: root.thumb;
+        border-radius: self.width / 2;
+        background: root.wide ? Theme.text-2 : Theme.text-3;
+        animate width { duration: 100ms; }
+    }
+
+    touch := TouchArea {
+        // The offset when the drag started.
+        property <length> start;
+        mouse-cursor: default;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                self.start = root.offset;
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.offset = clamp(
+                    self.start - root.range * ((self.mouse-y - self.pressed-y) / max(1px, root.height - root.thumb)),
+                    -root.range,
+                    0px);
+            }
+        }
+    }
+}

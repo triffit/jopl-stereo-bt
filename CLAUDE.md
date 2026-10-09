@@ -147,7 +147,8 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   `OutputConfig`/`DeviceSettings`, live via `OutputControls`.
 - Device cards collapse (`DeviceSettings::collapsed`, UI-only, no engine update) and then
   show `DeviceRow::summary`. Card controls are a `GridLayout` so both rows share columns;
-  the page `ScrollView` binds `content-width` to its visible width (no sideways scrolling).
+  the page is a `Flickable` (`content-width` = its width: no sideways scrolling) with the
+  custom Windows 11 style `PageScrollBar` (3 px, 6 px on hover, draggable).
 
 ## Ping and level meters (F18, F19)
 
