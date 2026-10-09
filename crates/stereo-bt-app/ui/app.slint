@@ -3,13 +3,14 @@
 
 import { AboutSlint, ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { AccentCheckBox, AccentSlider, GradientButton, OutlineButton, Pill, Segmented } from "controls.slint";
+import { AccentCheckBox, AccentSlider, GradientButton, OutlineButton, Pill, Segmented, SmallButton } from "controls.slint";
 
 export struct DeviceRow {
     id: string,
     name: string,
     is-source: bool,
     checked: bool,
+    can-make-default: bool,
     subtitle: string,
     // Empty when the card shows no badge.
     badge: string,
@@ -104,6 +105,7 @@ component DeviceControls inherits GridLayout {
 component DeviceCard inherits Rectangle {
     in property <DeviceRow> device;
     callback checked-changed(bool);
+    callback make-default();
     callback mode-changed(int);
     callback delay-changed(float);
     callback volume-changed(float);
@@ -141,6 +143,15 @@ component DeviceCard inherits Rectangle {
                 font-size: 13px;
                 overflow: elide;
             }
+            if device.can-make-default: HorizontalLayout {
+                alignment: start;
+                padding-top: 4px;
+                SmallButton {
+                    text: "Make default";
+                    label: "Make " + device.name + " the Windows default device";
+                    clicked => { root.make-default(); }
+                }
+            }
         }
         if device.badge != "": VerticalLayout {
             alignment: center;
@@ -176,9 +187,14 @@ export component MainWindow inherits Window {
     in property <int> status-kind;
     in property <string> error-text;
     in property <string> version;
+    in property <bool> follow-system-volume;
+    // Current Windows volume, e.g. "45 %"; empty when not following.
+    in property <string> system-volume-text;
 
     callback toggle-running();
+    callback follow-system-volume-changed(bool);
     callback checked-changed(string, bool);
+    callback make-default(string);
     callback mode-changed(string, int);
     callback delay-changed(string, float);
     callback volume-changed(string, float);
@@ -278,6 +294,27 @@ export component MainWindow inherits Window {
                     color: Theme.text-muted;
                     vertical-alignment: center;
                     overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    AccentCheckBox {
+                        checked: root.follow-system-volume;
+                        label: "Follow system volume";
+                        toggled(on) => { root.follow-system-volume-changed(on); }
+                    }
+                }
+                Text {
+                    text: "Follow system volume";
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                if root.system-volume-text != "": Text {
+                    text: root.system-volume-text;
+                    color: Theme.accent-light;
+                    vertical-alignment: center;
+                    min-width: 40px;
+                    horizontal-alignment: right;
                 }
             }
         }
@@ -292,6 +329,7 @@ export component MainWindow inherits Window {
                 for row in root.devices: DeviceCard {
                     device: row;
                     checked-changed(on) => { root.checked-changed(row.id, on); }
+                    make-default => { root.make-default(row.id); }
                     mode-changed(mode) => { root.mode-changed(row.id, mode); }
                     delay-changed(value) => { root.delay-changed(row.id, value); }
                     volume-changed(value) => { root.volume-changed(row.id, value); }

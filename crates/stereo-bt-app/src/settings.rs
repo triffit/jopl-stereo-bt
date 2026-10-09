@@ -38,6 +38,8 @@ pub(crate) struct Settings {
     /// Whether the Windows default device keeps playing while streaming
     /// (`false` mutes it, which needs a spare output device as the source).
     pub(crate) include_default: bool,
+    /// Whether every device follows the Windows volume of the default device.
+    pub(crate) follow_system_volume: bool,
     pub(crate) devices: Vec<DeviceSettings>,
 }
 
@@ -45,6 +47,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             include_default: true,
+            follow_system_volume: true,
             devices: Vec::new(),
         }
     }
@@ -94,6 +97,7 @@ impl Settings {
                 })
                 .collect(),
             include_default: self.include_default,
+            follow_system_volume: self.follow_system_volume,
         }
     }
 }
@@ -167,6 +171,22 @@ mod tests {
     fn default_device_keeps_playing_by_default() {
         assert!(Settings::default().include_default);
         assert!(Settings::default().engine_config().include_default);
+    }
+
+    #[test]
+    fn devices_follow_the_system_volume_by_default() {
+        assert!(Settings::default().follow_system_volume);
+        assert!(Settings::default().engine_config().follow_system_volume);
+    }
+
+    #[test]
+    fn settings_saved_before_this_option_existed_follow_by_default() {
+        let old = "include-default = false\n";
+
+        let settings: Settings = toml::from_str(old).unwrap();
+
+        assert!(settings.follow_system_volume);
+        assert!(!settings.include_default);
     }
 
     #[test]

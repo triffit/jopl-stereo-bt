@@ -2,7 +2,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use stereo_bt_core::DeviceEvent;
+use stereo_bt_core::{DeviceEvent, DeviceId};
 
 use crate::{EngineConfig, EngineStatus, MuteJournal, Platform, Supervisor, SupervisorError};
 
@@ -18,6 +18,7 @@ pub(crate) enum Command {
     Start(EngineConfig, Sender<Result<(), SupervisorError>>),
     Update(EngineConfig, Sender<Result<(), SupervisorError>>),
     Stop(Sender<Result<(), SupervisorError>>),
+    MakeDefault(DeviceId, Sender<Result<(), SupervisorError>>),
     Shutdown,
 }
 
@@ -48,6 +49,9 @@ pub(crate) fn run<P: Platform, J: MuteJournal>(
             }
             Ok(Command::Stop(reply)) => {
                 let _ = reply.send(supervisor.stop());
+            }
+            Ok(Command::MakeDefault(id, reply)) => {
+                let _ = reply.send(supervisor.make_default(&id));
             }
             Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {}
@@ -149,6 +153,7 @@ mod tests {
         EngineConfig {
             outputs: vec![OutputConfig::new(id("B")), OutputConfig::new(id("C"))],
             include_default: false,
+            follow_system_volume: true,
         }
     }
 

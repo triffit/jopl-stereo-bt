@@ -9,9 +9,11 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   (no Windows deps).
 - `crates/stereo-bt-wasapi` — thin adapter over the `wasapi` crate: `ComGuard`,
   `list_output_devices`, `default_output_id`, `LoopbackCapture`, `RenderStream`,
-  `DeviceWatcher`, plus `is_muted`/`set_muted` and `MmcssGuard`. The **only** `unsafe` in the
-  workspace lives in `endpoint_mute.rs` and `mmcss.rs` (module-level `allow`, every block has
-  a `// SAFETY:` comment). Workspace lint is `unsafe_code = "deny"`; core and engine
+  `DeviceWatcher`, plus `is_muted`/`set_muted`/`system_volume`, `set_default_output` and
+  `MmcssGuard`. The **only** `unsafe` in the workspace lives in `endpoint_volume.rs`,
+  `mmcss.rs` and `default_device.rs` (module-level `allow`, every block has a `// SAFETY:`
+  comment). `default_device.rs` declares the undocumented `IPolicyConfig` COM interface
+  (all 12 methods, vtable order matters) via `windows_core::interface`. Workspace lint is `unsafe_code = "deny"`; core and engine
   `#![forbid(unsafe_code)]`.
   All streams 48 kHz f32 stereo, shared mode with Windows autoconvert.
 - `crates/stereo-bt-engine` — `Session`: one capture thread → `FanOut` (one `rtrb` SPSC
@@ -56,6 +58,15 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   widgets only for `ScrollView` and `AboutSlint`.
 - The source (default) device's checkbox is the include-default toggle; `Settings::default()`
   has it **on** (default device keeps playing), muting is opt-in.
+
+## Volume and default device
+
+- Follow system volume (setting, default on): `Supervisor::maintain` reads the source's
+  `SystemVolume` every 100 ms and sets `Session::set_master_gain` (dB → amplitude, mute → 0;
+  our own mute of the source is ignored). Loopback is pre-volume, so this is the only way the
+  followers track it. `OutputChain` ramps every gain change over one block (no clicks).
+- "Make default" on a card → `Engine::make_default` → `Supervisor::make_default`
+  (`IPolicyConfig::SetDefaultEndpoint` for console + multimedia roles), then reconcile.
 
 ## Sync model
 

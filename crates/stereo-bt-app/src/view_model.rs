@@ -41,6 +41,8 @@ pub(crate) struct DeviceRow {
     pub(crate) is_source: bool,
     /// Checkbox state: for the source, whether it plays (include-default mode).
     pub(crate) checked: bool,
+    /// Connected and not already the default, so it can be made the default.
+    pub(crate) can_make_default: bool,
     pub(crate) subtitle: String,
     pub(crate) badge: Option<Badge>,
     pub(crate) channel_mode: ChannelMode,
@@ -86,6 +88,7 @@ fn row(
         } else {
             device.enabled
         },
+        can_make_default: present && !is_source,
         subtitle,
         badge,
         channel_mode: device.channel_mode,
@@ -295,6 +298,8 @@ mod tests {
         assert_eq!(badge_text(&rows[0]), Some("Default"));
         assert!(!rows[1].is_source);
         assert_eq!(badge_text(&rows[1]), None);
+        assert!(!rows[0].can_make_default);
+        assert!(rows[1].can_make_default);
     }
 
     #[test]
@@ -319,6 +324,7 @@ mod tests {
         let rows = device_rows(&settings, &status);
 
         assert_eq!(rows.len(), 3);
+        assert!(!rows[2].can_make_default);
         assert_eq!(badge_text(&rows[2]), Some("Offline"));
         assert_eq!(rows[2].badge.as_ref().unwrap().kind, BadgeKind::Warning);
     }

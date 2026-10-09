@@ -1,13 +1,13 @@
 //! Test doubles for the backend, platform and mute journal.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
-use stereo_bt_core::{DeviceId, DeviceInfo, Frame, SampleRate};
+use stereo_bt_core::{DeviceId, DeviceInfo, Frame, SampleRate, SystemVolume};
 
 use crate::{Backend, CaptureStream, MuteJournal, Platform, RenderSink};
 
@@ -127,6 +127,8 @@ pub(crate) struct World {
     pub(crate) capture_failing: bool,
     /// Every render stream opened, in order.
     pub(crate) render_opens: Vec<DeviceId>,
+    /// Windows volume per device; full volume when absent.
+    pub(crate) volumes: HashMap<DeviceId, SystemVolume>,
 }
 
 /// A world shared between the test and the platform (possibly on another thread).
@@ -180,6 +182,26 @@ impl Platform for FakePlatform {
             .collect())
     }
 
+    fn system_volume(&self, id: &DeviceId) -> Result<SystemVolume, FakeError> {
+        let world = lock(&self.world);
+        let volume = world.volumes.get(id).copied().unwrap_or(SystemVolume::FULL);
+        // Mirror Windows: the mute flag is part of the endpoint volume.
+        Ok(SystemVolume::new(
+            volume_db(volume),
+            f32::from(volume.percent()) / 100.0,
+            volume.is_muted() || world.muted.contains(id),
+        ))
+    }
+
+    fn set_default_output(&self, id: &DeviceId) -> Result<(), FakeError> {
+        let mut world = lock(&self.world);
+        if !world.active.contains(id) {
+            return Err(FakeError);
+        }
+        world.default = Some(id.clone());
+        Ok(())
+    }
+
     fn is_muted(&self, id: &DeviceId) -> Result<bool, FakeError> {
         Ok(lock(&self.world).muted.contains(id))
     }
@@ -209,5 +231,15 @@ impl MuteJournal for FakeJournal {
     fn save(&self, muted: &[DeviceId]) -> io::Result<()> {
         *lock(&self.0) = muted.to_vec();
         Ok(())
+    }
+}
+
+/// The decibel level of a fake volume, recovered from its amplitude.
+fn volume_db(volume: SystemVolume) -> f32 {
+    let amplitude = volume.unmuted().amplitude();
+    if amplitude <= 0.0 {
+        -96.0
+    } else {
+        20.0 * amplitude.log10()
     }
 }

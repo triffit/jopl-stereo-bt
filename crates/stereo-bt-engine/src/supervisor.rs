@@ -1,7 +1,7 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use stereo_bt_core::{DeviceId, DeviceInfo};
+use stereo_bt_core::{DeviceId, DeviceInfo, SystemVolume};
 
 use crate::{
     Backend, EngineConfig, MuteJournal, OutputConfig, OutputStatus, Platform, Session, StreamState,
@@ -41,6 +41,8 @@ pub struct EngineStatus {
     pub session_starts: u64,
     /// Active output devices, refreshed on every change (also while stopped).
     pub devices: Vec<DeviceInfo>,
+    /// The followed Windows volume in percent, while following it.
+    pub system_volume_percent: Option<u8>,
 }
 
 struct ActiveSession<B: Backend> {
@@ -81,6 +83,7 @@ pub struct Supervisor<P: Platform, J: MuteJournal> {
     muted_by_us: Vec<DeviceId>,
     session_starts: u64,
     devices: Vec<DeviceInfo>,
+    system_volume: Option<SystemVolume>,
 }
 
 impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
@@ -101,6 +104,7 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             muted_by_us,
             session_starts: 0,
             devices: Vec::new(),
+            system_volume: None,
         };
         supervisor.reconcile()?;
         Ok(supervisor)
@@ -143,6 +147,21 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
         self.reconcile()
     }
 
+    /// Makes `id` the Windows default device (the new audio source) and
+    /// switches streaming over to it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SupervisorError`] when Windows refuses or devices cannot be
+    /// queried or controlled.
+    pub fn make_default(&mut self, id: &DeviceId) -> Result<(), SupervisorError> {
+        self.platform
+            .set_default_output(id)
+            .map_err(platform_error)?;
+        // Windows also sends a device event, but switching now avoids the delay.
+        self.reconcile()
+    }
+
     /// Re-evaluates after devices were added, removed or the default changed.
     ///
     /// # Errors
@@ -160,6 +179,7 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
     ///
     /// Returns [`SupervisorError`] when devices cannot be queried or controlled.
     pub fn maintain(&mut self, now: Instant) -> Result<(), SupervisorError> {
+        self.follow_system_volume();
         let Some(active) = self.active.as_mut() else {
             return Ok(());
         };
@@ -197,6 +217,30 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
         Ok(())
     }
 
+    /// Applies the default device's Windows volume to every output, or unity
+    /// gain when not following it.
+    fn follow_system_volume(&mut self) {
+        let Some(active) = self.active.as_mut() else {
+            self.system_volume = None;
+            return;
+        };
+        if !self.config.follow_system_volume {
+            self.system_volume = None;
+            active.session.set_master_gain(1.0);
+            return;
+        }
+        // A failed read (e.g. the device is switching) keeps the last gain.
+        let Ok(mut volume) = self.platform.system_volume(&active.source) else {
+            return;
+        };
+        if self.muted_by_us.contains(&active.source) {
+            // Our own mute silences only the source, not the followers.
+            volume = volume.unmuted();
+        }
+        self.system_volume = Some(volume);
+        active.session.set_master_gain(volume.amplitude());
+    }
+
     /// A snapshot for the UI.
     #[must_use]
     pub fn status(&self) -> EngineStatus {
@@ -213,6 +257,7 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
                 .unwrap_or_default(),
             session_starts: self.session_starts,
             devices: self.devices.clone(),
+            system_volume_percent: self.system_volume.map(SystemVolume::percent),
         }
     }
 
@@ -376,7 +421,94 @@ mod tests {
                 .map(|raw| OutputConfig::new(id(raw)))
                 .collect(),
             include_default,
+            follow_system_volume: true,
         }
+    }
+
+    fn master_gain(s: &TestSupervisor) -> f32 {
+        s.active.as_ref().unwrap().session.master_gain()
+    }
+
+    #[test]
+    fn make_default_switches_the_source_and_streams_to_the_old_default() {
+        let w = world("A", &["A", "B"]);
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["A", "B"], true)).unwrap();
+        assert_eq!(s.status().source, Some(id("A")));
+
+        s.make_default(&id("B")).unwrap();
+
+        let status = s.status();
+        assert_eq!(lock(&w).default, Some(id("B")));
+        assert_eq!(status.source, Some(id("B")));
+        assert_eq!(output_ids(&status), vec![id("A")]);
+    }
+
+    #[test]
+    fn make_default_of_an_unknown_device_is_an_error() {
+        let w = world("A", &["A", "B"]);
+        let (mut s, _) = supervisor(&w, &[]);
+
+        assert!(s.make_default(&id("Z")).is_err());
+        assert_eq!(lock(&w).default, Some(id("A")));
+    }
+
+    #[test]
+    fn outputs_follow_the_system_volume_of_the_default_device() {
+        let w = world("A", &["A", "B"]);
+        lock(&w)
+            .volumes
+            .insert(id("A"), SystemVolume::new(-6.020_6, 0.6, false));
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["B"], true)).unwrap();
+
+        s.maintain(Instant::now()).unwrap();
+
+        assert!((master_gain(&s) - 0.5).abs() < 1e-3);
+        assert_eq!(s.status().system_volume_percent, Some(60));
+    }
+
+    #[test]
+    fn muting_the_system_volume_silences_the_followers() {
+        let w = world("A", &["A", "B"]);
+        lock(&w)
+            .volumes
+            .insert(id("A"), SystemVolume::new(-6.0, 0.6, true));
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["B"], true)).unwrap();
+
+        s.maintain(Instant::now()).unwrap();
+
+        assert!(master_gain(&s).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn our_own_mute_of_the_source_does_not_silence_the_followers() {
+        let w = world("A", &["A", "B"]);
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["B"], false)).unwrap();
+        assert!(lock(&w).muted.contains(&id("A")));
+
+        s.maintain(Instant::now()).unwrap();
+
+        assert!((master_gain(&s) - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn not_following_keeps_unity_gain() {
+        let w = world("A", &["A", "B"]);
+        lock(&w)
+            .volumes
+            .insert(id("A"), SystemVolume::new(-20.0, 0.2, false));
+        let (mut s, _) = supervisor(&w, &[]);
+        let mut cfg = config(&["B"], true);
+        cfg.follow_system_volume = false;
+        s.start(cfg).unwrap();
+
+        s.maintain(Instant::now()).unwrap();
+
+        assert!((master_gain(&s) - 1.0).abs() < f32::EPSILON);
+        assert_eq!(s.status().system_volume_percent, None);
     }
 
     fn output_ids(status: &EngineStatus) -> Vec<DeviceId> {

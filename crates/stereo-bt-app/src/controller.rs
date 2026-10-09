@@ -20,6 +20,7 @@ pub(crate) trait EngineControl {
     fn start(&self, config: EngineConfig) -> Result<(), String>;
     fn update(&self, config: EngineConfig) -> Result<(), String>;
     fn stop(&self) -> Result<(), String>;
+    fn make_default(&self, id: &DeviceId) -> Result<(), String>;
     fn status(&self) -> EngineStatus;
     fn last_error(&self) -> Option<String>;
 }
@@ -37,6 +38,10 @@ impl EngineControl for Engine {
         Engine::stop(self).map_err(|e| e.to_string())
     }
 
+    fn make_default(&self, id: &DeviceId) -> Result<(), String> {
+        Engine::make_default(self, id.clone()).map_err(|e| e.to_string())
+    }
+
     fn status(&self) -> EngineStatus {
         Engine::status(self)
     }
@@ -51,6 +56,9 @@ impl EngineControl for Engine {
 pub(crate) struct View {
     pub(crate) running: bool,
     pub(crate) include_default: bool,
+    pub(crate) follow_system_volume: bool,
+    /// The followed Windows volume in percent, while streaming and following.
+    pub(crate) system_volume_percent: Option<u8>,
     pub(crate) rows: Vec<DeviceRow>,
     pub(crate) status_line: String,
     pub(crate) status_kind: StatusKind,
@@ -122,6 +130,21 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         self.changed();
     }
 
+    /// Makes `id` the Windows default device (the audio source).
+    pub(crate) fn make_default(&mut self, id: &DeviceId) {
+        match self.engine.make_default(id) {
+            Ok(()) => self.error = None,
+            Err(e) => self.error = Some(format!("Could not make it the default device: {e}")),
+        }
+        self.status = self.engine.status();
+    }
+
+    /// Makes every device follow the Windows volume (or not).
+    pub(crate) fn set_follow_system_volume(&mut self, follow: bool) {
+        self.settings.follow_system_volume = follow;
+        self.changed();
+    }
+
     /// Checks or unchecks a device. For the default (source) device this
     /// chooses between playing natively and muting it while streaming.
     pub(crate) fn set_enabled(&mut self, id: &DeviceId, enabled: bool) {
@@ -188,6 +211,8 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         View {
             running: self.running,
             include_default: self.settings.include_default,
+            follow_system_volume: self.settings.follow_system_volume,
+            system_volume_percent: self.status.system_volume_percent,
             rows: view_model::device_rows(&self.settings, &self.status),
             status_line: view_model::status_line(&self.settings, &self.status),
             status_kind: view_model::status_kind(&self.status),
@@ -223,6 +248,7 @@ mod tests {
         started: Vec<EngineConfig>,
         updated: Vec<EngineConfig>,
         stopped: usize,
+        made_default: Vec<DeviceId>,
         fail: bool,
         status: EngineStatus,
     }
@@ -247,6 +273,15 @@ mod tests {
 
         fn stop(&self) -> Result<(), String> {
             self.0.borrow_mut().stopped += 1;
+            Ok(())
+        }
+
+        fn make_default(&self, id: &DeviceId) -> Result<(), String> {
+            let mut log = self.0.borrow_mut();
+            if log.fail {
+                return Err("refused".into());
+            }
+            log.made_default.push(id.clone());
             Ok(())
         }
 
@@ -367,6 +402,39 @@ mod tests {
 
         assert!(c.view().include_default);
         assert!(c.view().rows[0].checked);
+    }
+
+    #[test]
+    fn following_the_system_volume_is_sent_to_the_engine() {
+        let (mut c, engine, _) = controller();
+        c.set_enabled(&id("B"), true);
+        c.toggle_running();
+
+        c.set_follow_system_volume(false);
+        c.tick(Instant::now());
+
+        assert!(!c.view().follow_system_volume);
+        assert!(!engine.0.borrow().updated[0].follow_system_volume);
+    }
+
+    #[test]
+    fn make_default_asks_the_engine() {
+        let (mut c, engine, _) = controller();
+
+        c.make_default(&id("B"));
+
+        assert_eq!(engine.0.borrow().made_default, vec![id("B")]);
+        assert_eq!(c.view().error, None);
+    }
+
+    #[test]
+    fn refused_make_default_shows_an_error() {
+        let (mut c, engine, _) = controller();
+        engine.0.borrow_mut().fail = true;
+
+        c.make_default(&id("B"));
+
+        assert!(c.view().error.unwrap().contains("refused"));
     }
 
     #[test]

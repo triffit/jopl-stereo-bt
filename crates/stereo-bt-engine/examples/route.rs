@@ -41,6 +41,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut config = EngineConfig {
         outputs: Vec::new(),
         include_default: !mute,
+        follow_system_volume: true,
     };
     for target in targets {
         let mut parts = target.split(':');

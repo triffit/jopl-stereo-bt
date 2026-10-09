@@ -80,6 +80,7 @@ impl RenderPipeline {
         self.chain.set_delay(self.controls.delay());
         self.chain.set_volume(self.controls.volume());
         self.chain.set_channel_mode(self.controls.channel_mode());
+        self.chain.set_master_gain(self.controls.master_gain());
     }
 }
 

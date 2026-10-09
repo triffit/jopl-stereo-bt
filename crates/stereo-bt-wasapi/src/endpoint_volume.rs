@@ -1,13 +1,15 @@
-//! Endpoint mute via `IAudioEndpointVolume`, which the `wasapi` crate does not wrap.
+//! Endpoint volume and mute via `IAudioEndpointVolume`, which the `wasapi`
+//! crate does not wrap.
 //!
-//! Used to silence the default device while its loopback stays the audio
-//! source: loopback is captured before endpoint mute is applied.
+//! Loopback is captured before endpoint volume and mute are applied, so the
+//! app can mute the default device without losing its source, and must apply
+//! the system volume itself to follow it on the other devices.
 
 // The only `unsafe` in this crate besides `mmcss`: plain COM calls through
 // the `windows` crate. Each block states the invariants it relies on.
 #![allow(unsafe_code)]
 
-use stereo_bt_core::DeviceId;
+use stereo_bt_core::{DeviceId, SystemVolume};
 use wasapi::WasapiError;
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{IMMDeviceEnumerator, MMDeviceEnumerator};
@@ -44,6 +46,31 @@ pub fn set_muted(id: &DeviceId, muted: bool) -> Result<(), Error> {
     // GUID pointer is explicitly allowed by the API.
     unsafe { volume.SetMute(muted, std::ptr::null()) }.map_err(WasapiError::from)?;
     Ok(())
+}
+
+/// The Windows volume (decibels, slider position, mute) of endpoint `id`.
+///
+/// Requires a [`crate::ComGuard`] on the calling thread.
+///
+/// # Errors
+///
+/// Returns [`Error`] when the device does not exist or cannot be queried.
+pub fn system_volume(id: &DeviceId) -> Result<SystemVolume, Error> {
+    let volume = endpoint_volume(id)?;
+    // SAFETY: `volume` is a valid interface pointer; each getter only writes
+    // its out-parameter, which the wrapper owns.
+    let (level_db, scalar, muted) = unsafe {
+        (
+            volume.GetMasterVolumeLevel(),
+            volume.GetMasterVolumeLevelScalar(),
+            volume.GetMute(),
+        )
+    };
+    Ok(SystemVolume::new(
+        level_db.map_err(WasapiError::from)?,
+        scalar.map_err(WasapiError::from)?,
+        muted.map_err(WasapiError::from)?.as_bool(),
+    ))
 }
 
 fn endpoint_volume(id: &DeviceId) -> Result<IAudioEndpointVolume, Error> {

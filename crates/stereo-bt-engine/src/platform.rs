@@ -1,7 +1,7 @@
 use std::error::Error as StdError;
 use std::sync::Arc;
 
-use stereo_bt_core::{DeviceId, DeviceInfo, SampleRate};
+use stereo_bt_core::{DeviceId, DeviceInfo, SampleRate, SystemVolume};
 
 use crate::Backend;
 
@@ -27,6 +27,20 @@ pub trait Platform {
     ///
     /// Returns an error when devices cannot be queried.
     fn outputs(&self) -> Result<Vec<DeviceInfo>, Self::Error>;
+
+    /// The Windows volume of device `id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the device is missing or cannot be queried.
+    fn system_volume(&self, id: &DeviceId) -> Result<SystemVolume, Self::Error>;
+
+    /// Makes device `id` the Windows default output device.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the device is missing or Windows refuses.
+    fn set_default_output(&self, id: &DeviceId) -> Result<(), Self::Error>;
 
     /// Whether device `id` is muted.
     ///

@@ -20,6 +20,7 @@ mod output_chain;
 pub mod pcm;
 mod playout;
 mod sample_rate;
+mod system_volume;
 mod volume;
 
 pub use channel_mode::ChannelMode;
@@ -35,4 +36,5 @@ pub use frame::Frame;
 pub use output_chain::OutputChain;
 pub use playout::{Playout, PlayoutPlan};
 pub use sample_rate::SampleRate;
+pub use system_volume::SystemVolume;
 pub use volume::Volume;

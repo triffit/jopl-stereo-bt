@@ -308,6 +308,50 @@ export component OutlineButton inherits Rectangle {
     }
 }
 
+// Compact secondary action, e.g. "Make default" on a device card.
+export component SmallButton inherits Rectangle {
+    in property <string> text;
+    in property <string> label: root.text;
+    callback clicked();
+
+    height: 26px;
+    border-radius: Theme.small-radius;
+    background: touch.has-hover ? Theme.card-hover : transparent;
+    border-width: 1px;
+    border-color: focus.has-focus ? Theme.accent-light : Theme.border;
+    horizontal-stretch: 0;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                focus.focus();
+                root.clicked();
+            }
+        }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.text;
+            color: Theme.text-muted;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+}
+
 export component GradientButton inherits Rectangle {
     in property <string> text;
     callback clicked();

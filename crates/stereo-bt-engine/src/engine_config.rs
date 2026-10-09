@@ -8,4 +8,7 @@ pub struct EngineConfig {
     /// "Include default device in sync set": `true` lets the default device
     /// play natively; `false` (default) mutes it while streaming.
     pub include_default: bool,
+    /// Scale every output by the Windows volume (and mute) of the default
+    /// device, so all devices get louder and quieter together.
+    pub follow_system_volume: bool,
 }

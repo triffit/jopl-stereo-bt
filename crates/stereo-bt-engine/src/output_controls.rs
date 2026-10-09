@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use stereo_bt_core::{ChannelMode, Delay, Volume};
@@ -19,6 +19,8 @@ pub(crate) struct OutputControls {
     trims: AtomicU64,
     overruns: AtomicU64,
     stop: AtomicBool,
+    /// Shared gain (e.g. the system volume) as `f32` bits.
+    master_gain: AtomicU32,
     /// Set once, when the render thread fails; never touched on the audio path.
     error: Mutex<Option<String>>,
 }
@@ -34,6 +36,7 @@ impl OutputControls {
             trims: AtomicU64::new(0),
             overruns: AtomicU64::new(0),
             stop: AtomicBool::new(false),
+            master_gain: AtomicU32::new(1.0_f32.to_bits()),
             error: Mutex::new(None),
         }
     }
@@ -80,6 +83,15 @@ impl OutputControls {
 
     pub(crate) fn add_overrun(&self) {
         self.overruns.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn master_gain(&self) -> f32 {
+        f32::from_bits(self.master_gain.load(Ordering::Relaxed))
+    }
+
+    pub(crate) fn set_master_gain(&self, amplitude: f32) {
+        self.master_gain
+            .store(amplitude.to_bits(), Ordering::Relaxed);
     }
 
     /// Asks this output's render thread to finish.

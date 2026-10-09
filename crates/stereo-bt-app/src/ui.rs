@@ -51,6 +51,24 @@ where
     };
     window.on_toggle_running(bind.action(Controller::toggle_running));
     window.on_checked_changed(bind.device(|c, id, on: bool| c.set_enabled(id, on)));
+    window.on_make_default({
+        let bind = bind.clone();
+        move |raw_id| {
+            if let Ok(id) = DeviceId::new(raw_id.as_str()) {
+                bind.controller.borrow_mut().make_default(&id);
+                bind.refresh();
+            }
+        }
+    });
+    window.on_follow_system_volume_changed({
+        let bind = bind.clone();
+        move |follow| {
+            bind.controller
+                .borrow_mut()
+                .set_follow_system_volume(follow);
+            bind.refresh();
+        }
+    });
     window.on_mode_changed(
         bind.device(|c, id, mode: i32| c.set_channel_mode(id, mode_from_index(mode))),
     );
@@ -206,6 +224,13 @@ impl<E: EngineControl + 'static, S: SettingsStore + 'static> Binder<E, S> {
 fn apply_view(window: &MainWindow, rows: &VecModel<generated::DeviceRow>, view: &View) {
     window.set_running(view.running);
     window.set_status_line(view.status_line.as_str().into());
+    window.set_follow_system_volume(view.follow_system_volume);
+    window.set_system_volume_text(
+        view.system_volume_percent
+            .map(|percent| format!("{percent} %"))
+            .unwrap_or_default()
+            .into(),
+    );
     window.set_status_kind(match view.status_kind {
         StatusKind::Idle => 0,
         StatusKind::Streaming => 1,
@@ -232,6 +257,7 @@ fn to_ui_row(row: &DeviceRow) -> generated::DeviceRow {
         name: row.name.as_str().into(),
         is_source: row.is_source,
         checked: row.checked,
+        can_make_default: row.can_make_default,
         subtitle: row.subtitle.as_str().into(),
         badge: row.badge.as_ref().map_or("", |b| b.text).into(),
         badge_kind: row.badge.as_ref().map_or(2, |b| match b.kind {

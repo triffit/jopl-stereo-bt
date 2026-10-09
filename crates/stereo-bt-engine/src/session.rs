@@ -42,6 +42,7 @@ pub struct Session<B: Backend> {
     capture_thread: Option<JoinHandle<()>>,
     new_outputs: Sender<NewOutput>,
     outputs: Vec<OutputHandle>,
+    master_gain: f32,
 }
 
 impl<B: Backend> Session<B> {
@@ -84,6 +85,7 @@ impl<B: Backend> Session<B> {
             capture_thread: Some(capture_thread),
             new_outputs,
             outputs: Vec::with_capacity(configs.len()),
+            master_gain: 1.0,
         };
         for config in configs {
             session.add_output(config)?;
@@ -99,6 +101,7 @@ impl<B: Backend> Session<B> {
     pub fn add_output(&mut self, config: &OutputConfig) -> std::io::Result<()> {
         self.remove_output(&config.id);
         let controls = Arc::new(OutputControls::new(config));
+        controls.set_master_gain(self.master_gain);
         let (producer, consumer) = RingBuffer::new(QUEUE_FRAMES);
 
         let backend = Arc::clone(&self.backend);
@@ -149,6 +152,21 @@ impl<B: Backend> Session<B> {
         }
         // Its queue is now abandoned and pruned by the capture thread.
         true
+    }
+
+    /// Scales every output (current and future) by `amplitude`, clamped to
+    /// `0.0..=1.0`; changes ramp smoothly on the render threads.
+    pub fn set_master_gain(&mut self, amplitude: f32) {
+        self.master_gain = amplitude.clamp(0.0, 1.0);
+        for output in &self.outputs {
+            output.controls.set_master_gain(self.master_gain);
+        }
+    }
+
+    /// The gain shared by all outputs.
+    #[must_use]
+    pub fn master_gain(&self) -> f32 {
+        self.master_gain
     }
 
     /// The devices in this session, in the order they were added.

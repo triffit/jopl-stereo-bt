@@ -26,6 +26,7 @@ slint-build = "1.18"
 winresource = "0.1"
 thiserror = "2"
 wasapi = "0.25"
+windows-core = "0.62"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Media_Audio",

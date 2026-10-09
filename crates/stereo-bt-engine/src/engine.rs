@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use stereo_bt_core::DeviceEvent;
+use stereo_bt_core::{DeviceEvent, DeviceId};
 
 use crate::engine_loop::{self, Command, Shared};
 use crate::{EngineConfig, EngineStatus, MuteJournal, Platform, Supervisor, SupervisorError};
@@ -135,6 +135,15 @@ impl Engine {
         self.request(Command::Stop)
     }
 
+    /// Makes `id` the Windows default output device (the audio source).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] when Windows refuses or the engine does not respond.
+    pub fn make_default(&self, id: DeviceId) -> Result<(), EngineError> {
+        self.request(|reply| Command::MakeDefault(id, reply))
+    }
+
     /// The latest status snapshot (refreshed about every 100 ms).
     #[must_use]
     pub fn status(&self) -> EngineStatus {
@@ -218,6 +227,7 @@ mod tests {
         EngineConfig {
             outputs: vec![OutputConfig::new(id("B"))],
             include_default: false,
+            follow_system_volume: true,
         }
     }
 
@@ -240,6 +250,16 @@ mod tests {
         });
 
         assert!(matches!(result, Err(EngineError::Supervisor(_))));
+    }
+
+    #[test]
+    fn make_default_round_trips_through_the_engine_thread() {
+        let w = world();
+        let engine = engine(&w);
+
+        engine.make_default(id("B")).unwrap();
+
+        assert_eq!(lock(&w).default, Some(id("B")));
     }
 
     #[test]
