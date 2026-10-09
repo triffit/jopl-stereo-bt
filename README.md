@@ -23,7 +23,9 @@ The exe is `target/release/jopl-stereo-bt.exe`.
 4. **Small speakers** (e.g. JBL Go), per device on **Devices**:
    - **Bass cut**: removes bass the speaker cannot play, so it sounds louder and cleaner
      (try 120–180 Hz; lowest position is off).
-   - **Virtual bass**: adds harmonics so the cut bass is still heard (try 30–60 %).
+   - **Virtual bass**: adds harmonics above the bass cut, so the cut bass is still heard
+     (try 50–100 %). Set the bass cut to where the speaker stops playing bass (JBL Go:
+     about 180 Hz) first: the harmonics are placed above it.
    - **Speaker volume limit**: the speaker's own volume while following the system volume;
      lower it if the speaker distorts at full volume.
    - A limiter always prevents clipping.

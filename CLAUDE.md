@@ -110,8 +110,10 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 ## Sound shaping (F15)
 
 - `OutputChain`: delay → channel mode → `BassShaper` (bass cut: 2 × Butterworth biquad
-  high-pass per channel; virtual bass: mono bass low-pass → full-wave rectifier → band-pass
-  split..4× split, added to both channels) → gain → `Limiter` (instant attack, 150 ms release,
+  high-pass per channel; virtual bass: mono bass low-pass → envelope-normalised Chebyshev
+  polynomials T2..T5 (fixed harmonic weights, level follows the bass) → 4th-order high-pass
+  at the split + low-pass at 6× split, added to both channels; the split is the bass cut,
+  150 Hz while it is off) → gain → `Limiter` (instant attack, 150 ms release,
   ceiling exactly 1.0). None of them adds latency, so sound settings never affect sync.
 - Off is bit-exact pass-through, and the limiter leaves anything within full scale untouched:
   tests that use sample values as frame markers must keep them ≤ 1.0.

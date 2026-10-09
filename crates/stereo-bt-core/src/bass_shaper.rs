@@ -4,18 +4,23 @@ use crate::{BassCut, Frame, SampleRate, VirtualBass};
 /// Split frequency for virtual bass while the bass cut is off.
 const DEFAULT_SPLIT_HZ: u16 = 150;
 /// Harmonics are kept up to this multiple of the split frequency.
-const HARMONIC_SPAN: f64 = 4.0;
-/// Harmonic gain at 100 % virtual bass. A full-wave rectified sine has its
-/// second harmonic at about 0.42 of the input, so this makes it about 0.85.
-const MAX_HARMONIC_GAIN: f32 = 2.0;
+const HARMONIC_SPAN: f64 = 6.0;
+/// Strength of the 2nd to 5th harmonic, relative to the bass. A 55 Hz kick
+/// has its 4th and 5th harmonic at 220 and 275 Hz, which a small speaker
+/// plays, so those get the most weight.
+const HARMONIC_WEIGHTS: [f32; 4] = [0.6, 0.8, 0.8, 0.6];
+/// How fast the bass envelope falls after a peak.
+const ENVELOPE_RELEASE_SECONDS: f32 = 0.06;
 
 /// Tailors the bass to a small speaker, without added latency:
 ///
 /// - **Bass cut**: a 24 dB/octave Butterworth high-pass keeps bass the
 ///   speaker cannot play from wasting its headroom and distorting.
-/// - **Virtual bass**: harmonics (2×, 4×, …) of the bass below the split
-///   frequency, which the speaker can play; the ear then hears the missing
-///   fundamental.
+/// - **Virtual bass**: harmonics (2× to 5×) of the bass below the split
+///   frequency, kept only above it, where the speaker can play them; the ear
+///   then hears the missing fundamental. The bass is normalised by its
+///   envelope and fed through Chebyshev polynomials (`T_n(cos θ) = cos nθ`),
+///   so each harmonic has a fixed strength that follows the bass level.
 ///
 /// Both off is a bit-exact pass-through. Allocation-free.
 #[derive(Debug, Clone)]
@@ -27,8 +32,12 @@ pub struct BassShaper {
     high_pass: [[Biquad; 2]; 2],
     /// Isolates the bass of the mono mix (two stages).
     bass: [Biquad; 2],
-    /// Removes DC and the fundamentals from the rectified bass.
-    harmonics_floor: Biquad,
+    /// Peak envelope of the bass.
+    envelope: f32,
+    /// Per-sample envelope decay.
+    envelope_release: f32,
+    /// Keeps only harmonics above the split (two stages).
+    harmonics_floor: [Biquad; 2],
     /// Removes harmonics too high to sound like bass.
     harmonics_ceiling: Biquad,
 }
@@ -43,7 +52,12 @@ impl BassShaper {
             virtual_bass: VirtualBass::OFF,
             high_pass: [[Biquad::high_pass(sample_rate, 100.0, BUTTERWORTH_Q2); 2]; 2],
             bass: [Biquad::low_pass(sample_rate, 100.0, BUTTERWORTH_Q2); 2],
-            harmonics_floor: Biquad::high_pass(sample_rate, 100.0, BUTTERWORTH_Q2),
+            envelope: 0.0,
+            // Sample rates are far inside f32's exact integer range.
+            #[allow(clippy::cast_precision_loss)]
+            envelope_release: (-1.0 / (ENVELOPE_RELEASE_SECONDS * sample_rate.as_hz() as f32))
+                .exp(),
+            harmonics_floor: [Biquad::high_pass(sample_rate, 100.0, BUTTERWORTH_Q2); 2],
             harmonics_ceiling: Biquad::low_pass(sample_rate, 100.0, BUTTERWORTH_Q2),
         };
         shaper.retune();
@@ -75,8 +89,9 @@ impl BassShaper {
         for (stage, q) in self.bass.iter_mut().zip(BUTTERWORTH_Q4) {
             stage.retune(Biquad::low_pass(rate, split, q));
         }
-        self.harmonics_floor
-            .retune(Biquad::high_pass(rate, split, BUTTERWORTH_Q2));
+        for (stage, q) in self.harmonics_floor.iter_mut().zip(BUTTERWORTH_Q4) {
+            stage.retune(Biquad::high_pass(rate, split, q));
+        }
         self.harmonics_ceiling.retune(Biquad::low_pass(
             rate,
             split * HARMONIC_SPAN,
@@ -95,15 +110,35 @@ impl BassShaper {
         if self.virtual_bass != VirtualBass::OFF {
             let mono = f32::midpoint(frame.left, frame.right);
             let bass = cascade(&mut self.bass, mono);
-            // Full-wave rectification doubles every bass frequency.
+            let raw = self.harmonics(bass);
             let harmonics = self
                 .harmonics_ceiling
-                .process(self.harmonics_floor.process(bass.abs()));
-            let gain = f32::from(self.virtual_bass.as_percent()) / 100.0 * MAX_HARMONIC_GAIN;
+                .process(cascade(&mut self.harmonics_floor, raw));
+            let gain = f32::from(self.virtual_bass.as_percent()) / 100.0;
             out.left += harmonics * gain;
             out.right += harmonics * gain;
         }
         out
+    }
+}
+
+impl BassShaper {
+    /// The 2nd to 5th harmonic of `bass`, at a level that follows its envelope.
+    fn harmonics(&mut self, bass: f32) -> f32 {
+        self.envelope = (self.envelope * self.envelope_release).max(bass.abs());
+        if self.envelope < 1e-6 {
+            return 0.0;
+        }
+        // Instant attack keeps the normalised bass within -1..=1.
+        let x = (bass / self.envelope).clamp(-1.0, 1.0);
+        let (mut previous, mut current) = (1.0, x);
+        let mut sum = 0.0;
+        for weight in HARMONIC_WEIGHTS {
+            let next = 2.0 * x * current - previous;
+            (previous, current) = (current, next);
+            sum += weight * current;
+        }
+        sum * self.envelope
     }
 }
 
@@ -149,13 +184,43 @@ mod tests {
         assert!(gain(shaper(250, 0), 100.0) < 0.05);
     }
 
-    #[test]
-    fn virtual_bass_makes_cut_bass_audible_again() {
-        let without = gain(shaper(150, 0), 60.0);
-        let with = gain(shaper(150, 100), 60.0);
+    /// Peak level a small speaker that plays nothing below `floor_hz`
+    /// (4th-order roll-off) gives for a bass sine through the shaper.
+    fn heard_on_small_speaker(mut s: BassShaper, hz: f64, floor_hz: f64) -> f32 {
+        let rate = SampleRate::HZ_48000;
+        let mut speaker = [
+            Biquad::high_pass(rate, floor_hz, BUTTERWORTH_Q4[0]),
+            Biquad::high_pass(rate, floor_hz, BUTTERWORTH_Q4[1]),
+        ];
+        sine_gain(
+            |x| cascade(&mut speaker, s.process_frame(Frame::new(x, x)).left),
+            hz,
+        )
+    }
 
-        assert!(with > 0.3, "with virtual bass: {with}");
-        assert!(with > 10.0 * without);
+    #[test]
+    fn virtual_bass_is_heard_on_a_speaker_that_cannot_play_the_bass() {
+        let without = heard_on_small_speaker(shaper(180, 0), 55.0, 180.0);
+        let with = heard_on_small_speaker(shaper(180, 100), 55.0, 180.0);
+
+        assert!(with > 0.5, "with virtual bass: {with}");
+        assert!(with > 20.0 * without, "{without} vs {with}");
+    }
+
+    #[test]
+    fn virtual_bass_follows_the_bass_level() {
+        let loud = gain(shaper(180, 100), 55.0);
+        let mut quiet_shaper = shaper(180, 100);
+        let quiet = sine_gain(
+            |x| {
+                quiet_shaper
+                    .process_frame(Frame::new(x / 4.0, x / 4.0))
+                    .left
+            },
+            55.0,
+        );
+
+        assert!((loud / quiet - 4.0).abs() < 0.4, "{loud} vs {quiet}");
     }
 
     #[test]
