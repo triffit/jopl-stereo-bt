@@ -240,6 +240,8 @@ component DeviceCard inherits Card {
                         text: device.status;
                         font-size: 12px;
                         color: device.tone == 2 ? Theme.caution : device.tone == 3 ? Theme.error : Theme.text-3;
+                        // Errors explain what to do, so show them in full.
+                        wrap: device.tone == 3 ? word-wrap : no-wrap;
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
