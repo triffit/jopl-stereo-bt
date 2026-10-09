@@ -34,6 +34,7 @@ mod space;
 mod stereo_widener;
 mod system_volume;
 mod tap_analysis;
+mod upmix;
 mod volume;
 
 pub use auto_calibration::{
@@ -65,4 +66,5 @@ pub use space::{Percent, Space, StereoWidth};
 pub use stereo_widener::StereoWidener;
 pub use system_volume::SystemVolume;
 pub use tap_analysis::{DelaySuggestion, TapAnalysis, suggest_delay};
+pub use upmix::{SpeakerPosition, Upmix};
 pub use volume::Volume;

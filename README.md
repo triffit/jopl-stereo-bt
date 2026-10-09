@@ -29,10 +29,14 @@ The exe is `target/release/jopl-stereo-bt.exe`.
    - **Speaker volume limit**: the speaker's own volume while following the system volume;
      lower it if the speaker distorts at full volume.
    - A limiter always prevents clipping.
-5. **Sound → Space** (Devices page): **Stereo width** above 100 % makes a speaker pair
+5. **Surround** (Position on each device card): **Front** plays stereo as usual,
+   **Center** plays the middle (voices), **Rear** plays only the ambience, slightly later,
+   so music and films get a surround feel, e.g. the laptop in front and two JBLs behind
+   you on Rear (one Left, one Right). The ▴/▾ button collapses a card to its header.
+6. **Sound → Space** (Devices page): **Stereo width** above 100 % makes a speaker pair
    (one on Left, one on Right) sound further apart; **Reverb** and **Room size** add a
    room. Applies to every device played through the app, not to the default device.
-6. **Settings**: keep the default device playing, follow the system volume, keep playing
+7. **Settings**: keep the default device playing, follow the system volume, keep playing
    when the window is closed.
 
 ### Ping and level meters

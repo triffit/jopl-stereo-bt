@@ -1,10 +1,10 @@
 use crate::{
     BassCut, BassShaper, ChannelMode, Delay, DelayLine, Frame, Limiter, Ping, Reverb, SampleRate,
-    Space, StereoWidener, VirtualBass, Volume,
+    Space, SpeakerPosition, StereoWidener, Upmix, VirtualBass, Volume,
 };
 
 /// The per-device processing chain: delay, space (stereo width, reverb),
-/// channel mapping, bass shaping (bass cut and virtual bass), gain (device
+/// surround position (front, center, rear), channel mapping, bass shaping (bass cut and virtual bass), gain (device
 /// volume times the shared master gain), then a limiter. Space comes before
 /// the channel mapping, so each speaker of a stereo pair gets its own side
 /// of the widened image and its own reverb. Nothing in it adds latency beyond the delay, so
@@ -19,6 +19,7 @@ pub struct OutputChain {
     channel_mode: ChannelMode,
     widener: StereoWidener,
     reverb: Reverb,
+    upmix: Upmix,
     bass: BassShaper,
     ping: Ping,
     limiter: Limiter,
@@ -37,6 +38,7 @@ impl OutputChain {
             channel_mode: ChannelMode::default(),
             widener: StereoWidener::default(),
             reverb: Reverb::new(sample_rate),
+            upmix: Upmix::new(sample_rate),
             bass: BassShaper::new(sample_rate),
             ping: Ping::new(sample_rate),
             limiter: Limiter::new(sample_rate),
@@ -54,6 +56,11 @@ impl OutputChain {
     /// Sets which part of the stereo signal this device plays.
     pub fn set_channel_mode(&mut self, mode: ChannelMode) {
         self.channel_mode = mode;
+    }
+
+    /// Sets where this speaker stands in a surround setup.
+    pub fn set_position(&mut self, position: SpeakerPosition) {
+        self.upmix.set_position(position);
     }
 
     /// Plays a short double beep on this device, on top of the audio and
@@ -105,7 +112,8 @@ impl OutputChain {
             let spacious = self
                 .reverb
                 .process_frame(self.widener.process_frame(delayed));
-            let shaped = self.bass.process_frame(self.channel_mode.apply(spacious));
+            let positioned = self.upmix.process_frame(spacious);
+            let shaped = self.bass.process_frame(self.channel_mode.apply(positioned));
             let pinged = self.ping.process_frame(shaped.scaled(gain));
             *frame = self.limiter.process_frame(pinged);
         }

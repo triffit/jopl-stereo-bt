@@ -1,7 +1,7 @@
 //! What the window shows, derived purely from settings, engine status and
 //! the last microphone measurement.
 
-use stereo_bt_core::{ChannelMode, DeviceId, DeviceLatency};
+use stereo_bt_core::{ChannelMode, DeviceId, DeviceLatency, SpeakerPosition};
 use stereo_bt_engine::{EngineStatus, StreamState};
 
 use crate::settings::{DeviceSettings, Settings};
@@ -58,6 +58,9 @@ impl Measurement {
 }
 
 /// One device card.
+// A flat view row mirroring the Slint struct; each flag is an independent
+// display state, so an enum would only obscure it.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DeviceRow {
     pub(crate) id: DeviceId,
@@ -79,6 +82,11 @@ pub(crate) struct DeviceRow {
     pub(crate) max_volume_percent: u8,
     /// Battery level in percent, for devices that report one.
     pub(crate) battery_percent: Option<u8>,
+    pub(crate) position: SpeakerPosition,
+    /// The card shows only its header (and the summary).
+    pub(crate) collapsed: bool,
+    /// The main settings in a few words, for a collapsed card.
+    pub(crate) summary: String,
 }
 
 /// One lane of the timing overview: when a device is heard.
@@ -173,6 +181,9 @@ fn row(
         bass_cut_hz: device.bass_cut.as_hz(),
         virtual_bass_percent: device.virtual_bass.as_percent(),
         max_volume_percent: device.max_volume.as_percent(),
+        position: device.position,
+        collapsed: device.collapsed,
+        summary: summary(device),
         battery_percent: status
             .batteries
             .iter()
@@ -307,6 +318,26 @@ pub(crate) fn timeline(lanes: &[Lane]) -> Timeline {
             .find(|l| l.is_source)
             .map_or(0.0, |l| l.plays_ms),
     }
+}
+
+/// The main settings of a device in a few words, e.g. "Rear, Right, 41 ms, 90 %".
+fn summary(device: &DeviceSettings) -> String {
+    let position = match device.position {
+        SpeakerPosition::Front => "",
+        SpeakerPosition::Center => "Center, ",
+        SpeakerPosition::Rear => "Rear, ",
+    };
+    let channels = match device.channel_mode {
+        ChannelMode::Stereo => "Stereo",
+        ChannelMode::LeftOnly => "Left",
+        ChannelMode::RightOnly => "Right",
+        ChannelMode::MonoMix => "Mono",
+    };
+    format!(
+        "{position}{channels}, {} ms, {} %",
+        device.delay.as_millis(),
+        device.volume.as_percent()
+    )
 }
 
 /// The level meter fill (percent) of each row, in row order; `None` for
@@ -500,6 +531,20 @@ mod tests {
         let rows = device_rows(&settings, &status, None);
 
         assert_eq!(levels(&rows, &status), vec![None, Some(70), None]);
+    }
+
+    #[test]
+    fn summary_names_the_main_settings() {
+        let (mut settings, status) = setup(&["B"]);
+        let device = settings.device_mut(&id("B")).unwrap();
+        device.channel_mode = ChannelMode::RightOnly;
+        device.delay = stereo_bt_core::Delay::from_millis(41).unwrap();
+        device.volume = stereo_bt_core::Volume::from_percent(90).unwrap();
+        device.position = SpeakerPosition::Rear;
+
+        let rows = device_rows(&settings, &status, None);
+
+        assert_eq!(rows[1].summary, "Rear, Right, 41 ms, 90 %");
     }
 
     #[test]

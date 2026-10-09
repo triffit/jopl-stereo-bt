@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use stereo_bt_core::{
-    BassCut, ChannelMode, Delay, DeviceId, DeviceInfo, Space, VirtualBass, Volume,
+    BassCut, ChannelMode, Delay, DeviceId, DeviceInfo, Space, SpeakerPosition, VirtualBass, Volume,
 };
 use stereo_bt_engine::{EngineConfig, OutputConfig};
 
@@ -26,6 +26,12 @@ pub(crate) struct DeviceSettings {
     /// The device's own volume while following the system volume.
     #[serde(default)]
     pub(crate) max_volume: Volume,
+    /// Where the speaker stands in a surround setup (F20).
+    #[serde(default)]
+    pub(crate) position: SpeakerPosition,
+    /// Whether its card shows only the header.
+    #[serde(default)]
+    pub(crate) collapsed: bool,
 }
 
 impl DeviceSettings {
@@ -40,6 +46,8 @@ impl DeviceSettings {
             bass_cut: BassCut::OFF,
             virtual_bass: VirtualBass::OFF,
             max_volume: Volume::FULL,
+            position: SpeakerPosition::Front,
+            collapsed: false,
         }
     }
 }
@@ -116,6 +124,7 @@ impl Settings {
                     bass_cut: d.bass_cut,
                     virtual_bass: d.virtual_bass,
                     max_volume: d.max_volume,
+                    position: d.position,
                 })
                 .collect(),
             include_default: self.include_default,

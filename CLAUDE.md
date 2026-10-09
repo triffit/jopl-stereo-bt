@@ -139,6 +139,16 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - WASAPI loopback is captured **before** endpoint volume/mute (verified on hardware
   2026-10-08), so muting the default endpoint keeps the source audio.
 
+## Surround upmix (F20)
+
+- `Upmix` (core) per output, after space and before the channel mode: Front passes through,
+  Center = mid, Rear = (L−R)/2 low-passed at 7 kHz, delayed 15 ms (buffer allocated in
+  `OutputChain::new`), ×1.4, right rear inverted. `SpeakerPosition` per device in
+  `OutputConfig`/`DeviceSettings`, live via `OutputControls`.
+- Device cards collapse (`DeviceSettings::collapsed`, UI-only, no engine update) and then
+  show `DeviceRow::summary`. Card controls are a `GridLayout` so both rows share columns;
+  the page `ScrollView` binds `content-width` to its visible width (no sideways scrolling).
+
 ## Ping and level meters (F18, F19)
 
 - Ping: `Engine::ping` (fire-and-forget command) → `Session::ping` bumps a counter in

@@ -1,4 +1,4 @@
-use stereo_bt_core::{BassCut, ChannelMode, Delay, DeviceId, VirtualBass, Volume};
+use stereo_bt_core::{BassCut, ChannelMode, Delay, DeviceId, SpeakerPosition, VirtualBass, Volume};
 
 /// User settings for one output device.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +18,8 @@ pub struct OutputConfig {
     /// The device's own Windows volume while following the system volume
     /// (F15); below 100 % keeps a small speaker out of its distorting range.
     pub max_volume: Volume,
+    /// Where the speaker stands in a surround setup (F20).
+    pub position: SpeakerPosition,
 }
 
 impl OutputConfig {
@@ -33,6 +35,7 @@ impl OutputConfig {
             bass_cut: BassCut::OFF,
             virtual_bass: VirtualBass::OFF,
             max_volume: Volume::FULL,
+            position: SpeakerPosition::Front,
         }
     }
 }

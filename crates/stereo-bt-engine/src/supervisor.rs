@@ -642,6 +642,7 @@ fn apply_live<B: Backend>(session: &Session<B>, output: &OutputConfig) {
     let _ = session.set_channel_mode(&output.id, output.channel_mode);
     let _ = session.set_bass_cut(&output.id, output.bass_cut);
     let _ = session.set_virtual_bass(&output.id, output.virtual_bass);
+    let _ = session.set_position(&output.id, output.position);
 }
 
 fn platform_error(error: impl std::error::Error + Send + Sync + 'static) -> SupervisorError {

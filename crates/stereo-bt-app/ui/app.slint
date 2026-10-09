@@ -20,6 +20,11 @@ export struct DeviceRow {
     battery: string,
     battery-glyph: string,
     battery-low: bool,
+    // 0 front, 1 center, 2 rear
+    position: int,
+    collapsed: bool,
+    // The main settings in a few words, shown while collapsed.
+    summary: string,
     status: string,
     // 0 neutral, 1 good, 2 caution, 3 error
     tone: int,
@@ -164,6 +169,7 @@ component DeviceControls inherits VerticalLayout {
     // The speaker volume limit only acts while following the system volume.
     in property <bool> following;
     callback mode-changed(int);
+    callback position-changed(int);
     callback delay-changed(float);
     callback volume-changed(float);
     callback bass-cut-changed(float);
@@ -176,6 +182,7 @@ component DeviceControls inherits VerticalLayout {
         volume-slider.value = device.volume;
         delay-slider.value = device.delay;
         mode-picker.current = device.mode;
+        position-picker.current = device.position;
         bass-slider.value = device.bass-cut;
         virtual-bass-slider.value = device.virtual-bass;
         max-volume-slider.value = device.max-volume;
@@ -186,66 +193,81 @@ component DeviceControls inherits VerticalLayout {
     padding-top: 4px;
     padding-bottom: 10px;
     spacing: 4px;
-    HorizontalLayout {
-        spacing: 28px;
-        VerticalLayout {
-            spacing: 6px;
-            width: 248px;
-            Description {
-                text: "Channels";
-                color: Theme.text-2;
+    // A grid, so both rows share their columns.
+    GridLayout {
+        spacing-horizontal: 24px;
+        spacing-vertical: 6px;
+        Row {
+            VerticalLayout {
+                spacing: 6px;
+                Description {
+                    text: "Channels";
+                    color: Theme.text-2;
+                }
+                mode-picker := Segmented {
+                    options: ["Stereo", "Left", "Right", "Mono"];
+                    current: device.mode;
+                    label: "Channels for " + device.name;
+                    selected(mode) => { root.mode-changed(mode); }
+                }
             }
-            mode-picker := Segmented {
-                options: ["Stereo", "Left", "Right", "Mono"];
-                current: device.mode;
-                label: "Channels for " + device.name;
-                selected(mode) => { root.mode-changed(mode); }
+            VerticalLayout {
+                spacing: 6px;
+                Description {
+                    text: "Position";
+                    color: Theme.text-2;
+                }
+                position-picker := Segmented {
+                    options: ["Front", "Center", "Rear"];
+                    current: device.position;
+                    label: "Surround position of " + device.name;
+                    selected(position) => { root.position-changed(position); }
+                }
+            }
+            delay-slider := LabeledSlider {
+                title: "Delay";
+                label: "Delay in milliseconds for " + device.name;
+                minimum: 0;
+                maximum: 500;
+                value: device.delay;
+                value-text: round(self.value) + " ms";
+                changed(value) => { root.delay-changed(value); }
+            }
+            volume-slider := LabeledSlider {
+                title: "Volume";
+                label: "Volume for " + device.name;
+                value: device.volume;
+                value-text: round(self.value);
+                changed(value) => { root.volume-changed(value); }
             }
         }
-        delay-slider := LabeledSlider {
-            title: "Delay";
-            label: "Delay in milliseconds for " + device.name;
-            minimum: 0;
-            maximum: 500;
-            value: device.delay;
-            value-text: round(self.value) + " ms";
-            changed(value) => { root.delay-changed(value); }
-        }
-        volume-slider := LabeledSlider {
-            title: "Volume";
-            label: "Volume for " + device.name;
-            value: device.volume;
-            value-text: round(self.value);
-            changed(value) => { root.volume-changed(value); }
-        }
-    }
-    HorizontalLayout {
-        spacing: 28px;
-        // The lowest slider position means off (below the 40 Hz minimum).
-        bass-slider := LabeledSlider {
-            width: 248px;
-            title: "Bass cut";
-            label: "Bass cut in hertz for " + device.name + "; lowest position is off";
-            minimum: 30;
-            maximum: 300;
-            value: device.bass-cut;
-            value-text: self.value < 40 ? "Off" : round(self.value) + " Hz";
-            changed(value) => { root.bass-cut-changed(value); }
-        }
-        virtual-bass-slider := LabeledSlider {
-            title: "Virtual bass";
-            label: "Virtual bass in percent for " + device.name;
-            value: device.virtual-bass;
-            value-text: self.value < 1 ? "Off" : round(self.value) + " %";
-            changed(value) => { root.virtual-bass-changed(value); }
-        }
-        max-volume-slider := LabeledSlider {
-            title: root.following ? "Speaker volume limit" : "Speaker volume limit (with Follow system volume)";
-            label: "Speaker volume limit in percent for " + device.name + (root.following ? "" : "; only used while following the system volume");
-            enabled: root.following;
-            value: device.max-volume;
-            value-text: round(self.value) + " %";
-            changed(value) => { root.max-volume-changed(value); }
+        Row {
+            // The lowest slider position means off (below the 40 Hz minimum).
+            bass-slider := LabeledSlider {
+                title: "Bass cut";
+                label: "Bass cut in hertz for " + device.name + "; lowest position is off";
+                minimum: 30;
+                maximum: 300;
+                value: device.bass-cut;
+                value-text: self.value < 40 ? "Off" : round(self.value) + " Hz";
+                changed(value) => { root.bass-cut-changed(value); }
+            }
+            virtual-bass-slider := LabeledSlider {
+                title: "Virtual bass";
+                label: "Virtual bass in percent for " + device.name;
+                value: device.virtual-bass;
+                value-text: self.value < 1 ? "Off" : round(self.value) + " %";
+                changed(value) => { root.virtual-bass-changed(value); }
+            }
+            max-volume-slider := LabeledSlider {
+                colspan: 2;
+                title: root.following ? "Speaker volume limit" : "Speaker volume limit (with Follow system volume)";
+                label: "Speaker volume limit in percent for " + device.name + (root.following ? "" : "; only used while following the system volume");
+                enabled: root.following;
+                value: device.max-volume;
+                value-text: round(self.value) + " %";
+                changed(value) => { root.max-volume-changed(value); }
+            }
         }
     }
 }
@@ -273,7 +295,7 @@ component SpaceCard inherits Card {
             padding-bottom: 10px;
             spacing: 28px;
             LabeledSlider {
-                width: 248px;
+                width: 220px;
                 title: "Stereo width";
                 label: "Stereo width in percent; 100 is unchanged, 0 is mono";
                 maximum: 200;
@@ -305,6 +327,8 @@ component DeviceCard inherits Card {
     // Level meter fill in percent; negative hides the meter.
     in property <int> level: -1;
     callback ping();
+    callback position-changed(int);
+    callback collapsed-changed(bool);
     in property <bool> following;
     callback bass-cut-changed(float);
     callback virtual-bass-changed(float);
@@ -360,6 +384,11 @@ component DeviceCard inherits Card {
                             tone: device.tone;
                         }
                     }
+                    if device.collapsed && device.checked && !device.is-source: Text {
+                        text: device.summary;
+                        font-size: 12px;
+                        color: Theme.text-2;
+                    }
                     Text {
                         text: device.status;
                         font-size: 12px;
@@ -402,6 +431,14 @@ component DeviceCard inherits Card {
                     clicked => { root.make-default(); }
                 }
             }
+            if device.checked && !device.is-source: VerticalLayout {
+                alignment: center;
+                SubtleButton {
+                    glyph: device.collapsed ? "\u{E70D}" : "\u{E70E}";
+                    label: (device.collapsed ? "Show all settings of " : "Show only the header of ") + device.name;
+                    clicked => { root.collapsed-changed(!device.collapsed); }
+                }
+            }
             VerticalLayout {
                 alignment: center;
                 ToggleSwitch {
@@ -412,9 +449,10 @@ component DeviceCard inherits Card {
                 }
             }
         }
-        if device.checked && !device.is-source: Separator { }
-        if device.checked && !device.is-source: DeviceControls {
+        if device.checked && !device.is-source && !device.collapsed: Separator { }
+        if device.checked && !device.is-source && !device.collapsed: DeviceControls {
             device: root.device;
+            position-changed(position) => { root.position-changed(position); }
             following: root.following;
             bass-cut-changed(value) => { root.bass-cut-changed(value); }
             virtual-bass-changed(value) => { root.virtual-bass-changed(value); }
@@ -772,6 +810,8 @@ export component MainWindow inherits Window {
     // Level meter fill per device row; negative while not playing.
     in property <[int]> levels;
     callback ping(string);
+    callback position-changed(string, int);
+    callback collapsed-changed(string, bool);
     in property <float> stereo-width: 100;
     in property <float> reverb;
     in property <float> room-size: 50;
@@ -831,6 +871,8 @@ export component MainWindow inherits Window {
             border-color: Theme.stroke;
 
             ScrollView {
+                // Wrap long texts instead of scrolling sideways.
+                content-width: self.visible-width;
                 VerticalLayout {
                     padding-left: 36px;
                     padding-right: 36px;
@@ -913,6 +955,8 @@ export component MainWindow inherits Window {
                             device: row;
                             level: index < root.levels.length ? root.levels[index] : -1;
                             ping => { root.ping(row.id); }
+                            position-changed(position) => { root.position-changed(row.id, position); }
+                            collapsed-changed(collapsed) => { root.collapsed-changed(row.id, collapsed); }
                             checked-changed(on) => { root.checked-changed(row.id, on); }
                             make-default => { root.make-default(row.id); }
                             mode-changed(mode) => { root.mode-changed(row.id, mode); }

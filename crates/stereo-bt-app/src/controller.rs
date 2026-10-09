@@ -5,7 +5,8 @@
 use std::time::{Duration, Instant};
 
 use stereo_bt_core::{
-    BassCut, ChannelMode, Delay, DeviceId, Percent, Space, StereoWidth, VirtualBass, Volume,
+    BassCut, ChannelMode, Delay, DeviceId, Percent, Space, SpeakerPosition, StereoWidth,
+    VirtualBass, Volume,
 };
 use stereo_bt_engine::{
     CalibrationReport, CalibrationRequest, CalibrationState, Engine, EngineConfig, EngineStatus,
@@ -348,6 +349,20 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         let clamped = u8::try_from(percent.clamp(0, 100)).unwrap_or(100);
         let volume = Volume::from_percent(clamped).unwrap_or(Volume::FULL);
         self.edit(id, |d| d.max_volume = volume);
+    }
+
+    /// Sets where a speaker stands in a surround setup (F20).
+    pub(crate) fn set_position(&mut self, id: &DeviceId, position: SpeakerPosition) {
+        self.edit(id, |d| d.position = position);
+    }
+
+    /// Shows only the header of a device card, or all its settings again.
+    /// Remembered, but nothing changes for the engine.
+    pub(crate) fn set_collapsed(&mut self, id: &DeviceId, collapsed: bool) {
+        if let Some(device) = self.settings.device_mut(id) {
+            device.collapsed = collapsed;
+            self.unsaved_since.get_or_insert_with(Instant::now);
+        }
     }
 
     /// Periodic work: refresh status, learn new devices, push pending
@@ -1357,6 +1372,38 @@ mod tests {
         c.ping(&id("B"));
 
         assert_eq!(engine.0.borrow().pinged, vec![id("B")]);
+    }
+
+    #[test]
+    fn f20_position_reaches_the_engine() {
+        let (mut c, engine, _) = controller();
+        c.set_enabled(&id("B"), true);
+        c.toggle_running();
+
+        c.set_position(&id("B"), SpeakerPosition::Rear);
+        c.tick(Instant::now());
+
+        let log = engine.0.borrow();
+        assert_eq!(
+            log.updated.last().unwrap().outputs[0].position,
+            SpeakerPosition::Rear
+        );
+    }
+
+    #[test]
+    fn collapsing_a_card_is_remembered_without_engine_changes() {
+        let (mut c, engine, store) = controller();
+        c.set_enabled(&id("B"), true);
+        c.toggle_running();
+        c.tick(Instant::now());
+        let updates = engine.0.borrow().updated.len();
+
+        c.set_collapsed(&id("B"), true);
+        c.tick(Instant::now() + SAVE_DELAY + Duration::from_millis(1));
+
+        assert!(c.view().rows[1].collapsed);
+        assert_eq!(engine.0.borrow().updated.len(), updates);
+        assert!(store.saved.borrow().last().unwrap().devices[1].collapsed);
     }
 
     #[test]

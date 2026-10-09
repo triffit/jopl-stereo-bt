@@ -91,6 +91,7 @@ impl RenderPipeline {
         self.chain.set_bass_cut(self.controls.bass_cut());
         self.chain.set_virtual_bass(self.controls.virtual_bass());
         self.chain.set_space(self.controls.space());
+        self.chain.set_position(self.controls.position());
         let pings = self.controls.ping_requests();
         if pings != self.pings_seen {
             self.pings_seen = pings;

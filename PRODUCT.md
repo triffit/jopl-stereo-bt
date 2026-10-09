@@ -43,6 +43,7 @@ and do not compensate for the different latency of each Bluetooth device.
 | F17 | Battery level | Each device card shows the battery level Windows knows for it (Bluetooth devices that report one, usually via the hands-free profile), refreshed every minute; amber below 15 %. |
 | F18 | Ping | A Ping button on each playing device plays a short double beep on it only, regardless of its volume, to tell identical speakers apart. |
 | F19 | Level meter | Each playing device shows a peak level meter (-60 to 0 dB, falling 30 dB/s), amber near full scale. |
+| F20 | Surround upmix | Per device a position: Front (stereo as usual), Center (mono middle: voices) or Rear (ambience = left minus right, 15 ms later, below 7 kHz, left and right rear in opposite phase), like passive Dolby Pro Logic. Device cards collapse to their header with a short summary. |
 
 ## Later (v2+)
 

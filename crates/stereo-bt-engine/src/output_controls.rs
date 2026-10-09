@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, O
 use std::sync::{Mutex, PoisonError};
 
 use stereo_bt_core::{
-    BassCut, ChannelMode, Delay, Percent, Space, StereoWidth, VirtualBass, Volume,
+    BassCut, ChannelMode, Delay, Percent, Space, SpeakerPosition, StereoWidth, VirtualBass, Volume,
 };
 
 use crate::state_cell::StateCell;
@@ -16,6 +16,7 @@ pub(crate) struct OutputControls {
     delay_millis: AtomicU16,
     volume_percent: AtomicU8,
     channel_mode: AtomicU8,
+    position: AtomicU8,
     bass_cut_hz: AtomicU16,
     virtual_bass_percent: AtomicU8,
     width_percent: AtomicU8,
@@ -44,6 +45,7 @@ impl OutputControls {
             delay_millis: AtomicU16::new(config.delay.as_millis()),
             volume_percent: AtomicU8::new(config.volume.as_percent()),
             channel_mode: AtomicU8::new(mode_to_u8(config.channel_mode)),
+            position: AtomicU8::new(position_to_u8(config.position)),
             bass_cut_hz: AtomicU16::new(config.bass_cut.as_hz()),
             virtual_bass_percent: AtomicU8::new(config.virtual_bass.as_percent()),
             width_percent: AtomicU8::new(Space::default().width.as_percent()),
@@ -147,6 +149,15 @@ impl OutputControls {
         self.level.store(level.to_bits(), Ordering::Relaxed);
     }
 
+    pub(crate) fn position(&self) -> SpeakerPosition {
+        position_from_u8(self.position.load(Ordering::Relaxed))
+    }
+
+    pub(crate) fn set_position(&self, position: SpeakerPosition) {
+        self.position
+            .store(position_to_u8(position), Ordering::Relaxed);
+    }
+
     pub(crate) fn state(&self) -> StreamState {
         self.state.get()
     }
@@ -233,6 +244,22 @@ const fn mode_from_u8(value: u8) -> ChannelMode {
     }
 }
 
+const fn position_to_u8(position: SpeakerPosition) -> u8 {
+    match position {
+        SpeakerPosition::Front => 0,
+        SpeakerPosition::Center => 1,
+        SpeakerPosition::Rear => 2,
+    }
+}
+
+const fn position_from_u8(value: u8) -> SpeakerPosition {
+    match value {
+        1 => SpeakerPosition::Center,
+        2 => SpeakerPosition::Rear,
+        _ => SpeakerPosition::Front,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,6 +291,19 @@ mod tests {
 
         assert_eq!(c.delay().as_millis(), 123);
         assert_eq!(c.volume().as_percent(), 42);
+    }
+
+    #[test]
+    fn f20_every_position_round_trips() {
+        let c = controls();
+        for position in [
+            SpeakerPosition::Front,
+            SpeakerPosition::Center,
+            SpeakerPosition::Rear,
+        ] {
+            c.set_position(position);
+            assert_eq!(c.position(), position);
+        }
     }
 
     #[test]

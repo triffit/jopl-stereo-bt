@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
-use stereo_bt_core::{ChannelMode, DeviceId};
+use stereo_bt_core::{ChannelMode, DeviceId, SpeakerPosition};
 
 use crate::assistant::Phase;
 use crate::controller::{AssistantView, Controller, EngineControl, MeasureView, View};
@@ -53,6 +53,11 @@ where
     window.on_toggle_running(bind.action(Controller::toggle_running));
     window.on_checked_changed(bind.device(|c, id, on: bool| c.set_enabled(id, on)));
     window.on_ping(bind.device_action(Controller::ping));
+    window.on_position_changed(
+        bind.device(|c, id, index: i32| c.set_position(id, position_from_index(index))),
+    );
+    window
+        .on_collapsed_changed(bind.device(|c, id, collapsed: bool| c.set_collapsed(id, collapsed)));
     window.on_make_default(bind.device_action(Controller::make_default));
     window.on_measure_start(bind.action(Controller::start_measurement));
     window.on_measure_apply(bind.action(Controller::measurement_apply));
@@ -472,6 +477,9 @@ fn to_ui_row(row: &DeviceRow, heading: &str) -> generated::DeviceRow {
             .map(|level| view_model::battery_glyph(level).to_string())
             .unwrap_or_default()
             .into(),
+        position: position_to_index(row.position),
+        collapsed: row.collapsed,
+        summary: row.summary.as_str().into(),
         battery_low: row
             .battery_percent
             .is_some_and(|level| level < view_model::LOW_BATTERY_PERCENT),
@@ -494,6 +502,22 @@ fn to_ui_row(row: &DeviceRow, heading: &str) -> generated::DeviceRow {
         },
         virtual_bass: f32::from(row.virtual_bass_percent),
         max_volume: f32::from(row.max_volume_percent),
+    }
+}
+
+const fn position_to_index(position: SpeakerPosition) -> i32 {
+    match position {
+        SpeakerPosition::Front => 0,
+        SpeakerPosition::Center => 1,
+        SpeakerPosition::Rear => 2,
+    }
+}
+
+const fn position_from_index(index: i32) -> SpeakerPosition {
+    match index {
+        1 => SpeakerPosition::Center,
+        2 => SpeakerPosition::Rear,
+        _ => SpeakerPosition::Front,
     }
 }
 
@@ -536,6 +560,17 @@ mod tests {
             ChannelMode::MonoMix,
         ] {
             assert_eq!(mode_from_index(mode_to_index(mode)), mode);
+        }
+    }
+
+    #[test]
+    fn position_index_round_trips() {
+        for position in [
+            SpeakerPosition::Front,
+            SpeakerPosition::Center,
+            SpeakerPosition::Rear,
+        ] {
+            assert_eq!(position_from_index(position_to_index(position)), position);
         }
     }
 

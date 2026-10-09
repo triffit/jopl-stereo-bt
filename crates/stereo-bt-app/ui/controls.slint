@@ -293,9 +293,11 @@ export component CommandButton inherits Rectangle {
     }
 }
 
-// Borderless text button, e.g. "Make default" on a device card.
+// Borderless text or icon button, e.g. "Make default" on a device card.
 export component SubtleButton inherits Rectangle {
     in property <string> text;
+    // Shown instead of the text when set.
+    in property <string> glyph;
     in property <string> label: root.text;
     callback clicked();
 
@@ -325,9 +327,14 @@ export component SubtleButton inherits Rectangle {
         }
     }
     HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        Text {
+        padding-left: root.glyph != "" ? 8px : 12px;
+        padding-right: root.glyph != "" ? 8px : 12px;
+        if root.glyph != "": Icon {
+            glyph: root.glyph;
+            color: Theme.text;
+            font-size: 12px;
+        }
+        if root.glyph == "": Text {
             text: root.text;
             color: Theme.text;
             vertical-alignment: center;
@@ -368,7 +375,7 @@ export component Segmented inherits Rectangle {
             padding: 1px;
             for option[index] in root.options: Rectangle {
                 horizontal-stretch: 1;
-                min-width: 60px;
+                min-width: 50px;
                 background: index == root.current ? #ffffff17 : segment-touch.has-hover ? #ffffff0a : transparent;
                 accessible-role: tab;
                 accessible-label: option;

@@ -6,7 +6,8 @@ use std::thread::{self, JoinHandle};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use stereo_bt_core::{
-    BassCut, ChannelMode, Delay, DeviceId, Frame, Playout, SampleRate, Space, VirtualBass, Volume,
+    BassCut, ChannelMode, Delay, DeviceId, Frame, Playout, SampleRate, Space, SpeakerPosition,
+    VirtualBass, Volume,
 };
 
 use crate::backend::{Backend, CaptureStream, RenderSink};
@@ -267,6 +268,12 @@ impl<B: Backend> Session<B> {
     #[must_use]
     pub fn set_channel_mode(&self, id: &DeviceId, mode: ChannelMode) -> bool {
         self.with_output(id, |c| c.set_channel_mode(mode))
+    }
+
+    /// Changes an output's surround position live. Returns `false` for an unknown device.
+    #[must_use]
+    pub fn set_position(&self, id: &DeviceId, position: SpeakerPosition) -> bool {
+        self.with_output(id, |c| c.set_position(position))
     }
 
     /// Plays a short double beep on one output. Returns `false` for an unknown device.
