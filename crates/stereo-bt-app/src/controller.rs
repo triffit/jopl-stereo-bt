@@ -4,7 +4,9 @@
 
 use std::time::{Duration, Instant};
 
-use stereo_bt_core::{BassCut, ChannelMode, Delay, DeviceId, VirtualBass, Volume};
+use stereo_bt_core::{
+    BassCut, ChannelMode, Delay, DeviceId, Percent, Space, StereoWidth, VirtualBass, Volume,
+};
 use stereo_bt_engine::{
     CalibrationReport, CalibrationRequest, CalibrationState, Engine, EngineConfig, EngineStatus,
 };
@@ -145,6 +147,7 @@ pub(crate) struct View {
     pub(crate) toggles: Toggles,
     /// The followed Windows volume in percent, while streaming and following.
     pub(crate) system_volume_percent: Option<u8>,
+    pub(crate) space: Space,
     pub(crate) rows: Vec<DeviceRow>,
     /// "Active" or "Off".
     pub(crate) status_word: &'static str,
@@ -293,6 +296,26 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         self.edit(id, |d| d.volume = volume);
     }
 
+    /// Sets the stereo width, clamped to 0..=200 % (F16).
+    pub(crate) fn set_stereo_width(&mut self, percent: i64) {
+        let clamped =
+            u8::try_from(percent.clamp(0, i64::from(StereoWidth::MAX_PERCENT))).unwrap_or(100);
+        self.settings.space.width = StereoWidth::from_percent(clamped).unwrap_or_default();
+        self.changed();
+    }
+
+    /// Sets the reverb amount, clamped to 0..=100 % (F16).
+    pub(crate) fn set_reverb(&mut self, percent: i64) {
+        self.settings.space.reverb = percent_clamped(percent);
+        self.changed();
+    }
+
+    /// Sets the reverb's room size, clamped to 0..=100 % (F16).
+    pub(crate) fn set_room_size(&mut self, percent: i64) {
+        self.settings.space.room_size = percent_clamped(percent);
+        self.changed();
+    }
+
     /// Sets the bass cut (F15): below the lowest cutoff it is off, above the
     /// highest it is clamped.
     pub(crate) fn set_bass_cut(&mut self, id: &DeviceId, hz: i64) {
@@ -363,6 +386,7 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
                 keep_streaming_on_close: self.settings.keep_streaming_on_close,
             },
             system_volume_percent: self.status.system_volume_percent,
+            space: self.settings.space,
             out_of_sync: view_model::out_of_sync(&rows),
             measured_with: (!lanes.is_empty())
                 .then(|| measurement.map(|m| m.microphone.clone()))
@@ -726,6 +750,10 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         self.engine_dirty = true;
         self.unsaved_since.get_or_insert_with(Instant::now);
     }
+}
+
+fn percent_clamped(percent: i64) -> Percent {
+    Percent::new(u8::try_from(percent.clamp(0, 100)).unwrap_or(0)).unwrap_or(Percent::ZERO)
 }
 
 #[cfg(test)]
@@ -1280,6 +1308,24 @@ mod tests {
 
         assert_eq!(c.view().rows[1].virtual_bass_percent, 100);
         assert_eq!(c.view().rows[1].max_volume_percent, 0);
+    }
+
+    #[test]
+    fn f16_space_edits_are_clamped_and_reach_the_engine() {
+        let (mut c, engine, _) = controller();
+        c.set_enabled(&id("B"), true);
+        c.toggle_running();
+
+        c.set_stereo_width(250);
+        c.set_reverb(30);
+        c.set_room_size(-4);
+        c.tick(Instant::now());
+
+        let space = engine.0.borrow().updated.last().unwrap().space;
+        assert_eq!(space.width.as_percent(), 200);
+        assert_eq!(space.reverb.get(), 30);
+        assert_eq!(space.room_size.get(), 0);
+        assert_eq!(c.view().space, space);
     }
 
     #[test]

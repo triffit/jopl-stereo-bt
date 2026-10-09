@@ -29,7 +29,10 @@ The exe is `target/release/jopl-stereo-bt.exe`.
    - **Speaker volume limit**: the speaker's own volume while following the system volume;
      lower it if the speaker distorts at full volume.
    - A limiter always prevents clipping.
-5. **Settings**: keep the default device playing, follow the system volume, keep playing
+5. **Sound → Space** (Devices page): **Stereo width** above 100 % makes a speaker pair
+   (one on Left, one on Right) sound further apart; **Reverb** and **Room size** add a
+   room. Applies to every device played through the app, not to the default device.
+6. **Settings**: keep the default device playing, follow the system volume, keep playing
    when the window is closed.
 
 ## Troubleshooting

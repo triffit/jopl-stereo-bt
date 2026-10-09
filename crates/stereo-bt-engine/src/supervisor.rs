@@ -567,12 +567,13 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
         let Some(active) = self.active.as_mut().filter(|a| a.source == source) else {
             // New source: release the old streams before opening devices again.
             self.active = None;
-            let session = Session::start(
+            let mut session = Session::start(
                 self.platform.backend(),
                 self.platform.sample_rate(),
                 &desired,
             )
             .map_err(spawn_error)?;
+            session.set_space(self.config.space);
             self.session_starts += 1;
             self.active = Some(ActiveSession::new(session, source));
             return Ok(());
@@ -589,6 +590,7 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
         for config in desired.iter().filter(|o| !current.contains(&o.id)) {
             active.session.add_output(config).map_err(spawn_error)?;
         }
+        active.session.set_space(self.config.space);
         Ok(())
     }
 }
@@ -665,6 +667,7 @@ mod tests {
                 .collect(),
             include_default,
             follow_system_volume: true,
+            ..EngineConfig::default()
         }
     }
 
@@ -1149,6 +1152,20 @@ mod tests {
         s.update(changed).unwrap();
 
         assert_eq!(s.status().session_starts, 1);
+    }
+
+    #[test]
+    fn f16_space_changes_live_without_restart() {
+        let w = world("A", &["A", "B"]);
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["B"], false)).unwrap();
+        let mut changed = config(&["B"], false);
+        changed.space.reverb = stereo_bt_core::Percent::new(30).unwrap();
+
+        s.update(changed.clone()).unwrap();
+
+        assert_eq!(s.status().session_starts, 1);
+        assert_eq!(s.active.as_ref().unwrap().session.space(), changed.space);
     }
 
     #[test]

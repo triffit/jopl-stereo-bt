@@ -1,7 +1,9 @@
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
-use stereo_bt_core::{BassCut, ChannelMode, Delay, VirtualBass, Volume};
+use stereo_bt_core::{
+    BassCut, ChannelMode, Delay, Percent, Space, StereoWidth, VirtualBass, Volume,
+};
 
 use crate::state_cell::StateCell;
 use crate::{OutputConfig, StreamState};
@@ -16,6 +18,9 @@ pub(crate) struct OutputControls {
     channel_mode: AtomicU8,
     bass_cut_hz: AtomicU16,
     virtual_bass_percent: AtomicU8,
+    width_percent: AtomicU8,
+    reverb_percent: AtomicU8,
+    room_percent: AtomicU8,
     state: StateCell,
     underruns: AtomicU64,
     trims: AtomicU64,
@@ -37,6 +42,9 @@ impl OutputControls {
             channel_mode: AtomicU8::new(mode_to_u8(config.channel_mode)),
             bass_cut_hz: AtomicU16::new(config.bass_cut.as_hz()),
             virtual_bass_percent: AtomicU8::new(config.virtual_bass.as_percent()),
+            width_percent: AtomicU8::new(Space::default().width.as_percent()),
+            reverb_percent: AtomicU8::new(Space::default().reverb.get()),
+            room_percent: AtomicU8::new(Space::default().room_size.get()),
             state: StateCell::new(),
             underruns: AtomicU64::new(0),
             trims: AtomicU64::new(0),
@@ -92,6 +100,28 @@ impl OutputControls {
     pub(crate) fn set_virtual_bass(&self, amount: VirtualBass) {
         self.virtual_bass_percent
             .store(amount.as_percent(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn space(&self) -> Space {
+        let defaults = Space::default();
+        // Only validated values are ever stored.
+        Space {
+            width: StereoWidth::from_percent(self.width_percent.load(Ordering::Relaxed))
+                .unwrap_or(defaults.width),
+            reverb: Percent::new(self.reverb_percent.load(Ordering::Relaxed))
+                .unwrap_or(defaults.reverb),
+            room_size: Percent::new(self.room_percent.load(Ordering::Relaxed))
+                .unwrap_or(defaults.room_size),
+        }
+    }
+
+    pub(crate) fn set_space(&self, space: Space) {
+        self.width_percent
+            .store(space.width.as_percent(), Ordering::Relaxed);
+        self.reverb_percent
+            .store(space.reverb.get(), Ordering::Relaxed);
+        self.room_percent
+            .store(space.room_size.get(), Ordering::Relaxed);
     }
 
     pub(crate) fn state(&self) -> StreamState {
@@ -211,6 +241,21 @@ mod tests {
 
         assert_eq!(c.delay().as_millis(), 123);
         assert_eq!(c.volume().as_percent(), 42);
+    }
+
+    #[test]
+    fn f16_space_round_trips() {
+        let c = controls();
+        assert_eq!(c.space(), Space::default());
+        let space = Space {
+            width: StereoWidth::from_percent(170).unwrap(),
+            reverb: Percent::new(25).unwrap(),
+            room_size: Percent::new(80).unwrap(),
+        };
+
+        c.set_space(space);
+
+        assert_eq!(c.space(), space);
     }
 
     #[test]

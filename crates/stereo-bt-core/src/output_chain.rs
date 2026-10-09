@@ -1,11 +1,13 @@
 use crate::{
-    BassCut, BassShaper, ChannelMode, Delay, DelayLine, Frame, Limiter, SampleRate, VirtualBass,
-    Volume,
+    BassCut, BassShaper, ChannelMode, Delay, DelayLine, Frame, Limiter, Reverb, SampleRate, Space,
+    StereoWidener, VirtualBass, Volume,
 };
 
-/// The per-device processing chain: delay, channel mapping, bass shaping
-/// (bass cut and virtual bass), gain (device volume times the shared master
-/// gain), then a limiter. Nothing in it adds latency beyond the delay, so
+/// The per-device processing chain: delay, space (stereo width, reverb),
+/// channel mapping, bass shaping (bass cut and virtual bass), gain (device
+/// volume times the shared master gain), then a limiter. Space comes before
+/// the channel mapping, so each speaker of a stereo pair gets its own side
+/// of the widened image and its own reverb. Nothing in it adds latency beyond the delay, so
 /// sound settings never move a device out of sync.
 ///
 /// Gain changes ramp linearly across one processed block, so volume moves
@@ -15,6 +17,8 @@ use crate::{
 pub struct OutputChain {
     delay_line: DelayLine,
     channel_mode: ChannelMode,
+    widener: StereoWidener,
+    reverb: Reverb,
     bass: BassShaper,
     limiter: Limiter,
     volume_gain: f32,
@@ -30,6 +34,8 @@ impl OutputChain {
         Self {
             delay_line: DelayLine::new(sample_rate),
             channel_mode: ChannelMode::default(),
+            widener: StereoWidener::default(),
+            reverb: Reverb::new(sample_rate),
             bass: BassShaper::new(sample_rate),
             limiter: Limiter::new(sample_rate),
             volume_gain: Volume::default().gain(),
@@ -46,6 +52,13 @@ impl OutputChain {
     /// Sets which part of the stereo signal this device plays.
     pub fn set_channel_mode(&mut self, mode: ChannelMode) {
         self.channel_mode = mode;
+    }
+
+    /// Sets the stereo width and reverb.
+    pub fn set_space(&mut self, space: Space) {
+        self.widener.set_width(space.width);
+        self.reverb.set_amount(space.reverb);
+        self.reverb.set_room_size(space.room_size);
     }
 
     /// Sets the high-pass cutoff for small speakers.
@@ -81,7 +94,10 @@ impl OutputChain {
             let progress = (index + 1) as f32 / steps;
             let gain = start + (target - start) * progress;
             let delayed = self.delay_line.process_frame(*frame);
-            let shaped = self.bass.process_frame(self.channel_mode.apply(delayed));
+            let spacious = self
+                .reverb
+                .process_frame(self.widener.process_frame(delayed));
+            let shaped = self.bass.process_frame(self.channel_mode.apply(spacious));
             *frame = self.limiter.process_frame(shaped.scaled(gain));
         }
         if !frames.is_empty() {
@@ -113,6 +129,27 @@ mod tests {
         chain.process(&mut frames);
 
         assert_eq!(frames, input);
+    }
+
+    #[test]
+    fn each_speaker_of_a_pair_gets_its_side_of_the_widened_image() {
+        let space = Space {
+            width: crate::StereoWidth::from_percent(200).unwrap(),
+            ..Space::default()
+        };
+        let mut left = OutputChain::new(SampleRate::HZ_48000);
+        left.set_space(space);
+        left.set_channel_mode(ChannelMode::LeftOnly);
+        let mut right = left.clone();
+        right.set_channel_mode(ChannelMode::RightOnly);
+        let mut l = [Frame::new(0.6, 0.2)];
+        let mut r = l;
+
+        left.process(&mut l);
+        right.process(&mut r);
+
+        assert!((l[0].left - 0.8).abs() < 1e-6, "{l:?}");
+        assert!(r[0].left.abs() < 1e-6, "{r:?}");
     }
 
     #[test]

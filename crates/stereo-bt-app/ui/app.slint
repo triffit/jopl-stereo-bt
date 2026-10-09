@@ -246,6 +246,56 @@ component DeviceControls inherits VerticalLayout {
     }
 }
 
+// Stereo width and reverb for every device played through the app.
+component SpaceCard inherits Card {
+    in property <float> width-percent;
+    in property <float> reverb;
+    in property <float> room-size;
+    callback width-changed(float);
+    callback reverb-changed(float);
+    callback room-size-changed(float);
+
+    VerticalLayout {
+        CardHeader {
+            glyph: "\u{E8B9}";
+            title: "Space";
+            description: "Wider stereo makes a speaker pair sound further apart; reverb adds a room. Applies to every device played through the app; the default device plays as is.";
+        }
+        Separator { }
+        HorizontalLayout {
+            padding-left: 56px;
+            padding-right: 16px;
+            padding-top: 12px;
+            padding-bottom: 14px;
+            spacing: 28px;
+            LabeledSlider {
+                width: 248px;
+                title: "Stereo width";
+                label: "Stereo width in percent; 100 is unchanged, 0 is mono";
+                maximum: 200;
+                value: root.width-percent;
+                value-text: round(self.value) == 100 ? "Normal" : round(self.value) + " %";
+                changed(value) => { root.width-changed(value); }
+            }
+            reverb-slider := LabeledSlider {
+                title: "Reverb";
+                label: "Reverb in percent";
+                value: root.reverb;
+                value-text: self.value < 1 ? "Off" : round(self.value) + " %";
+                changed(value) => { root.reverb-changed(value); }
+            }
+            LabeledSlider {
+                title: "Room size";
+                label: "Reverb room size in percent";
+                enabled: reverb-slider.value >= 1;
+                value: root.room-size;
+                value-text: round(self.value) + " %";
+                changed(value) => { root.room-size-changed(value); }
+            }
+        }
+    }
+}
+
 component DeviceCard inherits Card {
     in property <DeviceRow> device;
     in property <bool> following;
@@ -674,6 +724,12 @@ export component MainWindow inherits Window {
     callback bass-cut-changed(string, float);
     callback virtual-bass-changed(string, float);
     callback max-volume-changed(string, float);
+    in property <float> stereo-width: 100;
+    in property <float> reverb;
+    in property <float> room-size: 50;
+    callback stereo-width-changed(float);
+    callback reverb-changed(float);
+    callback room-size-changed(float);
 
     property <bool> busy: root.assistant.active || root.measure.active;
 
@@ -821,6 +877,19 @@ export component MainWindow inherits Window {
                         if root.devices.length == 0: Description {
                             text: "No output devices found.";
                             font-size: 14px;
+                        }
+                        SectionTitle {
+                            text: "Sound";
+                            height: 36px;
+                            vertical-alignment: bottom;
+                        }
+                        SpaceCard {
+                            width-percent: root.stereo-width;
+                            reverb: root.reverb;
+                            room-size: root.room-size;
+                            width-changed(value) => { root.stereo-width-changed(value); }
+                            reverb-changed(value) => { root.reverb-changed(value); }
+                            room-size-changed(value) => { root.room-size-changed(value); }
                         }
                     }
 

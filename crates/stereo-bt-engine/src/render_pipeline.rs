@@ -82,6 +82,7 @@ impl RenderPipeline {
         self.chain.set_channel_mode(self.controls.channel_mode());
         self.chain.set_bass_cut(self.controls.bass_cut());
         self.chain.set_virtual_bass(self.controls.virtual_bass());
+        self.chain.set_space(self.controls.space());
         self.chain.set_master_gain(self.controls.master_gain());
     }
 }

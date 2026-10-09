@@ -39,6 +39,7 @@ and do not compensate for the different latency of each Bluetooth device.
 | F13 | Muted-app warning | Warns when an app plays on the default device but is muted for it in the Windows volume mixer (its sound then reaches no device), with an Unmute button. |
 | F14 | Measure with mic | Plays sweeps on one device at a time, finds them in a RAW microphone recording, and recommends the default device (the slowest by itself) and delays; verified within ~1 ms on hardware. |
 | F15 | Small-speaker sound | Per device: bass cut (24 dB/oct high-pass, off or 40–300 Hz), virtual bass (harmonics of the cut bass), a speaker volume limit while following the system volume, and an always-on limiter at full scale. No added latency. |
+| F16 | Space | For every device played through the app: stereo width (mid/side, 0–200 %) and a Freeverb-style room reverb (amount, room size) with different left and right tails, so a speaker pair sounds further apart. No added latency. |
 
 ## Later (v2+)
 

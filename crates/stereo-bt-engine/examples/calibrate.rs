@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         include_default: true,
         // `follow` raises target volumes to 100 % (restored afterwards).
         follow_system_volume: std::env::args().any(|a| a == "follow"),
+        ..EngineConfig::default()
     };
     engine.start(engine_config(&devices))?;
     thread::sleep(Duration::from_secs(2));

@@ -29,6 +29,21 @@ pub enum Error {
         /// The rejected value in percent.
         percent: u8,
     },
+    /// The requested stereo width exceeds its maximum.
+    #[error(
+        "stereo width of {percent} % is out of range (0..={max} %)",
+        max = crate::StereoWidth::MAX_PERCENT
+    )]
+    StereoWidthOutOfRange {
+        /// The rejected value in percent.
+        percent: u8,
+    },
+    /// The requested amount exceeds 100 %.
+    #[error("{percent} % is out of range (0..=100 %)")]
+    PercentOutOfRange {
+        /// The rejected value in percent.
+        percent: u8,
+    },
     /// The sample rate is outside the supported range.
     #[error(
         "sample rate of {hz} Hz is out of range ({min}..={max} Hz)",

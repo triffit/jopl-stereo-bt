@@ -1,3 +1,5 @@
+use stereo_bt_core::Space;
+
 use crate::OutputConfig;
 
 /// Everything the user configures for routing.
@@ -11,4 +13,6 @@ pub struct EngineConfig {
     /// Scale every output by the Windows volume (and mute) of the default
     /// device, so all devices get louder and quieter together.
     pub follow_system_volume: bool,
+    /// Stereo width and reverb for every output.
+    pub space: Space,
 }

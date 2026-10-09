@@ -2,7 +2,9 @@
 //! endpoint identifier, remembered across sessions and reconnects.
 
 use serde::{Deserialize, Serialize};
-use stereo_bt_core::{BassCut, ChannelMode, Delay, DeviceId, DeviceInfo, VirtualBass, Volume};
+use stereo_bt_core::{
+    BassCut, ChannelMode, Delay, DeviceId, DeviceInfo, Space, VirtualBass, Volume,
+};
 use stereo_bt_engine::{EngineConfig, OutputConfig};
 
 /// Settings for one device, remembered even while it is disconnected.
@@ -53,6 +55,8 @@ pub(crate) struct Settings {
     pub(crate) follow_system_volume: bool,
     /// Whether closing the window while playing keeps playing in the tray.
     pub(crate) keep_streaming_on_close: bool,
+    /// Stereo width and reverb for every device played through the app.
+    pub(crate) space: Space,
     pub(crate) devices: Vec<DeviceSettings>,
 }
 
@@ -62,6 +66,7 @@ impl Default for Settings {
             include_default: true,
             follow_system_volume: true,
             keep_streaming_on_close: true,
+            space: Space::default(),
             devices: Vec::new(),
         }
     }
@@ -115,6 +120,7 @@ impl Settings {
                 .collect(),
             include_default: self.include_default,
             follow_system_volume: self.follow_system_volume,
+            space: self.space,
         }
     }
 }

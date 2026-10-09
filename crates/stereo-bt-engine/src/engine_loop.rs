@@ -168,6 +168,7 @@ mod tests {
             outputs: vec![OutputConfig::new(id("B")), OutputConfig::new(id("C"))],
             include_default: false,
             follow_system_volume: true,
+            ..EngineConfig::default()
         }
     }
 

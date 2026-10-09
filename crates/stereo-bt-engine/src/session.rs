@@ -6,7 +6,7 @@ use std::thread::{self, JoinHandle};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use stereo_bt_core::{
-    BassCut, ChannelMode, Delay, DeviceId, Frame, Playout, SampleRate, VirtualBass, Volume,
+    BassCut, ChannelMode, Delay, DeviceId, Frame, Playout, SampleRate, Space, VirtualBass, Volume,
 };
 
 use crate::backend::{Backend, CaptureStream, RenderSink};
@@ -48,6 +48,7 @@ pub struct Session<B: Backend> {
     new_outputs: Sender<NewOutput>,
     outputs: Vec<OutputHandle>,
     master_gain: f32,
+    space: Space,
     /// The only output left audible, while isolating one for assisted sync.
     isolated: Option<DeviceId>,
 }
@@ -93,6 +94,7 @@ impl<B: Backend> Session<B> {
             new_outputs,
             outputs: Vec::with_capacity(configs.len()),
             master_gain: 1.0,
+            space: Space::default(),
             isolated: None,
         };
         for config in configs {
@@ -110,6 +112,7 @@ impl<B: Backend> Session<B> {
         self.remove_output(&config.id);
         let controls = Arc::new(OutputControls::new(config));
         controls.set_master_gain(self.master_gain);
+        controls.set_space(self.space);
         controls.set_silenced(self.is_silenced(&config.id));
         let (producer, consumer) = RingBuffer::new(QUEUE_FRAMES);
 
@@ -172,6 +175,14 @@ impl<B: Backend> Session<B> {
         }
     }
 
+    /// Sets stereo width and reverb for every output (current and future).
+    pub fn set_space(&mut self, space: Space) {
+        self.space = space;
+        for output in &self.outputs {
+            output.controls.set_space(space);
+        }
+    }
+
     /// Leaves only `device` audible (`None`: all outputs audible again).
     /// Isolating a device outside the session silences every output.
     pub fn isolate(&mut self, device: Option<&DeviceId>) {
@@ -191,6 +202,12 @@ impl<B: Backend> Session<B> {
         self.isolated
             .as_ref()
             .is_some_and(|isolated| isolated != id)
+    }
+
+    /// The stereo width and reverb shared by all outputs.
+    #[must_use]
+    pub fn space(&self) -> Space {
+        self.space
     }
 
     /// The gain shared by all outputs.

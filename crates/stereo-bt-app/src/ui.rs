@@ -87,6 +87,9 @@ where
     );
     window.on_delay_changed(bind.device(|c, id, millis: f32| c.set_delay(id, round(millis))));
     window.on_volume_changed(bind.device(|c, id, percent: f32| c.set_volume(id, round(percent))));
+    window.on_stereo_width_changed(bind.action_with(|c, v: f32| c.set_stereo_width(round(v))));
+    window.on_reverb_changed(bind.action_with(|c, v: f32| c.set_reverb(round(v))));
+    window.on_room_size_changed(bind.action_with(|c, v: f32| c.set_room_size(round(v))));
     window.on_bass_cut_changed(bind.device(|c, id, hz: f32| c.set_bass_cut(id, round(hz))));
     window.on_virtual_bass_changed(
         bind.device(|c, id, percent: f32| c.set_virtual_bass(id, round(percent))),
@@ -225,6 +228,18 @@ impl<E: EngineControl + 'static, S: SettingsStore + 'static> Binder<E, S> {
         }
     }
 
+    /// A callback with one value, e.g. a slider.
+    fn action_with<T>(
+        &self,
+        apply: impl Fn(&mut Controller<E, S>, T) + 'static,
+    ) -> impl Fn(T) + 'static {
+        let bind = self.clone();
+        move |value| {
+            apply(&mut bind.controller.borrow_mut(), value);
+            bind.refresh();
+        }
+    }
+
     /// A switch callback.
     fn flag(
         &self,
@@ -260,6 +275,9 @@ impl<E: EngineControl + 'static, S: SettingsStore + 'static> Binder<E, S> {
 
 fn apply_view(window: &MainWindow, rows: &VecModel<generated::DeviceRow>, view: &View) {
     window.set_running(view.running);
+    window.set_stereo_width(f32::from(view.space.width.as_percent()));
+    window.set_reverb(f32::from(view.space.reverb.get()));
+    window.set_room_size(f32::from(view.space.room_size.get()));
     window.set_status_word(view.status_word.into());
     window.set_status_message(view.status_message.as_str().into());
     window.set_include_default(view.toggles.include_default);

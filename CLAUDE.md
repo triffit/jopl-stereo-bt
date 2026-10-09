@@ -107,9 +107,14 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   overhead (same device native vs. through the pipeline), then the best default and delays.
 - Manual check: `cargo run --release -p stereo-bt-engine --example calibrate [follow]`.
 
-## Sound shaping (F15)
+## Sound shaping (F15, F16)
 
-- `OutputChain`: delay → channel mode → `BassShaper` (bass cut: 2 × Butterworth biquad
+- Space (F16, global `EngineConfig::space`, pushed to every output via `Session::set_space`):
+  `StereoWidener` (mid/side) and `Reverb` (Freeverb: 8 combs + 4 all-passes per channel,
+  right channel +23 samples so the tails differ; buffers allocated in `OutputChain::new`)
+  run **before** the channel mode, so each speaker of a pair gets its own side and tail.
+
+- `OutputChain`: delay → width → reverb → channel mode → `BassShaper` (bass cut: 2 × Butterworth biquad
   high-pass per channel; virtual bass: mono bass low-pass → envelope-normalised Chebyshev
   polynomials T2..T5 (fixed harmonic weights, level follows the bass) → 4th-order high-pass
   at the split + low-pass at 6× split, added to both channels; the split is the bass cut,
