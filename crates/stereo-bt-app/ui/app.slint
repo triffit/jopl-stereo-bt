@@ -79,7 +79,7 @@ component SectionTitle inherits Text {
 
 component Description inherits Text {
     color: Theme.text-3;
-    font-size: 12px;
+    font-size: 11px;
     wrap: word-wrap;
 }
 
@@ -95,13 +95,13 @@ component CardHeader inherits HorizontalLayout {
     in property <string> description;
     padding-left: 16px;
     padding-right: 16px;
-    padding-top: 12px;
-    padding-bottom: 12px;
+    padding-top: 8px;
+    padding-bottom: 8px;
     spacing: 16px;
-    min-height: 68px;
+    min-height: 52px;
     Icon {
         glyph: root.glyph;
-        font-size: 20px;
+        font-size: 18px;
         width: 24px;
     }
     VerticalLayout {
@@ -183,9 +183,9 @@ component DeviceControls inherits VerticalLayout {
 
     padding-left: 56px;
     padding-right: 16px;
-    padding-top: 12px;
-    padding-bottom: 14px;
-    spacing: 12px;
+    padding-top: 4px;
+    padding-bottom: 10px;
+    spacing: 4px;
     HorizontalLayout {
         spacing: 28px;
         VerticalLayout {
@@ -269,8 +269,8 @@ component SpaceCard inherits Card {
         HorizontalLayout {
             padding-left: 56px;
             padding-right: 16px;
-            padding-top: 12px;
-            padding-bottom: 14px;
+            padding-top: 6px;
+            padding-bottom: 10px;
             spacing: 28px;
             LabeledSlider {
                 width: 248px;
@@ -319,13 +319,13 @@ component DeviceCard inherits Card {
         HorizontalLayout {
             padding-left: 16px;
             padding-right: 16px;
-            padding-top: 12px;
-            padding-bottom: 12px;
+            padding-top: 8px;
+            padding-bottom: 8px;
             spacing: 16px;
-            min-height: 68px;
+            min-height: 52px;
             Icon {
                 glyph: device.worn ? "\u{E7F6}" : "\u{E7F5}";
-                font-size: 20px;
+                font-size: 18px;
                 width: 24px;
             }
             VerticalLayout {
@@ -713,7 +713,7 @@ export component MainWindow inherits Window {
     preferred-width: 1120px;
     min-height: 560px;
     preferred-height: 800px;
-    default-font-size: 14px;
+    default-font-size: 13px;
 
     in property <[DeviceRow]> devices;
     in property <bool> running;
@@ -834,9 +834,9 @@ export component MainWindow inherits Window {
                 VerticalLayout {
                     padding-left: 36px;
                     padding-right: 36px;
-                    padding-top: 28px;
-                    padding-bottom: 28px;
-                    spacing: 8px;
+                    padding-top: 18px;
+                    padding-bottom: 18px;
+                    spacing: 6px;
                     alignment: start;
 
                     HorizontalLayout {
@@ -845,7 +845,7 @@ export component MainWindow inherits Window {
                         Text {
                             text: root.page == 0 ? "Devices" : root.page == 1 ? "Sync" : "Settings";
                             color: Theme.text;
-                            font-size: 28px;
+                            font-size: 24px;
                             font-weight: 600;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
@@ -853,7 +853,7 @@ export component MainWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             CommandButton {
-                                height: 36px;
+                                height: 32px;
                                 text: root.running ? "Stop playing" : "Play on multiple devices";
                                 glyph: root.running ? "\u{E71A}" : "\u{E768}";
                                 primary: !root.running;
@@ -901,12 +901,12 @@ export component MainWindow inherits Window {
                         }
                     }
                     if root.page == 0: VerticalLayout {
-                        spacing: 8px;
+                        spacing: 6px;
                         for row[index] in root.devices: VerticalLayout {
-                        spacing: 8px;
+                        spacing: 6px;
                         if row.heading != "": SectionTitle {
                             text: row.heading;
-                            height: 36px;
+                            height: 28px;
                             vertical-alignment: bottom;
                         }
                         DeviceCard {
@@ -930,7 +930,7 @@ export component MainWindow inherits Window {
                         }
                         SectionTitle {
                             text: "Sound";
-                            height: 36px;
+                            height: 28px;
                             vertical-alignment: bottom;
                         }
                         SpaceCard {
@@ -945,10 +945,10 @@ export component MainWindow inherits Window {
 
                     // Sync page.
                     if root.page == 1: VerticalLayout {
-                    spacing: 8px;
+                    spacing: 6px;
                     SectionTitle {
                         text: "When each device plays";
-                        height: 36px;
+                        height: 28px;
                         vertical-alignment: bottom;
                     }
                     Timeline {
@@ -959,7 +959,7 @@ export component MainWindow inherits Window {
                     }
                     SectionTitle {
                         text: "Make them play together";
-                        height: 36px;
+                        height: 28px;
                         vertical-alignment: bottom;
                     }
                     Card {
@@ -1036,10 +1036,10 @@ export component MainWindow inherits Window {
 
                     // Settings page.
                     if root.page == 2: VerticalLayout {
-                    spacing: 8px;
+                    spacing: 6px;
                     SectionTitle {
                         text: "Playback";
-                        height: 36px;
+                        height: 28px;
                         vertical-alignment: bottom;
                     }
                     SettingCard {
@@ -1066,7 +1066,7 @@ export component MainWindow inherits Window {
                     }
                     SectionTitle {
                         text: "About";
-                        height: 36px;
+                        height: 28px;
                         vertical-alignment: bottom;
                     }
                     Card {
@@ -1100,7 +1100,7 @@ export component MainWindow inherits Window {
 export component ErrorWindow inherits Window {
     title: "JOPL-StereoBT";
     background: Theme.window;
-    default-font-size: 14px;
+    default-font-size: 13px;
     in property <string> message;
     callback close-requested();
     VerticalLayout {

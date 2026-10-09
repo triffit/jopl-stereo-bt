@@ -55,7 +55,7 @@ export component Slider inherits Rectangle {
         root.set(root.minimum + (x - root.thumb / 2) / (root.width - root.thumb) * (root.maximum - root.minimum));
     }
 
-    min-height: 32px;
+    min-height: 28px;
     min-width: 80px;
     horizontal-stretch: 1;
     opacity: root.enabled ? 1 : 0.4;
@@ -164,7 +164,7 @@ export component ToggleSwitch inherits Rectangle {
     in property <string> label: root.text;
     callback toggled(bool);
 
-    min-height: 32px;
+    min-height: 28px;
     horizontal-stretch: 0;
     accessible-role: checkbox;
     accessible-label: root.label;
@@ -239,7 +239,7 @@ export component CommandButton inherits Rectangle {
     in property <length> font-size: 14px;
     callback clicked();
 
-    height: 32px;
+    height: 30px;
     border-radius: Theme.control-radius;
     background: !root.enabled ? Theme.control
         : root.primary ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
@@ -299,7 +299,7 @@ export component SubtleButton inherits Rectangle {
     in property <string> label: root.text;
     callback clicked();
 
-    height: 32px;
+    height: 28px;
     border-radius: Theme.control-radius;
     background: touch.has-hover ? Theme.control : transparent;
     border-width: focus.has-focus ? 2px : 0;
@@ -342,7 +342,7 @@ export component Segmented inherits Rectangle {
     in property <string> label;
     callback selected(int);
 
-    height: 32px;
+    height: 28px;
     border-radius: Theme.control-radius;
     background: Theme.control;
     border-width: focus.has-focus ? 2px : 1px;
@@ -429,7 +429,7 @@ export component InfoBar inherits Rectangle {
         padding-top: 6px;
         padding-bottom: 6px;
         spacing: 12px;
-        min-height: 48px;
+        min-height: 40px;
         VerticalLayout {
             alignment: center;
             Rectangle {
@@ -469,7 +469,7 @@ export component NavItem inherits Rectangle {
     in property <bool> badge;
     callback clicked();
 
-    height: 36px;
+    height: 32px;
     border-radius: Theme.control-radius;
     background: root.selected ? Theme.layer : touch.has-hover ? Theme.control : transparent;
     border-width: focus.has-focus ? 2px : 0;
