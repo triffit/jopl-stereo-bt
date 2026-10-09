@@ -239,9 +239,11 @@ export component CommandButton inherits Rectangle {
     in property <bool> primary;
     in property <bool> enabled: true;
     in property <length> font-size: 14px;
+    // A smaller button for inside cards.
+    in property <bool> compact;
     callback clicked();
 
-    height: 30px;
+    height: root.compact ? 24px : 30px;
     border-radius: Theme.control-radius;
     background: !root.enabled ? Theme.control
         : root.primary ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
@@ -277,18 +279,18 @@ export component CommandButton inherits Rectangle {
         }
     }
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
+        padding-left: root.compact ? (root.text == "" ? 6px : 10px) : 14px;
+        padding-right: root.compact ? (root.text == "" ? 6px : 10px) : 14px;
         spacing: 8px;
         alignment: center;
         if root.glyph != "": Icon {
             glyph: root.glyph;
-            font-size: 14px;
+            font-size: root.compact ? 12px : 14px;
             color: root.primary && root.enabled ? #000000 : Theme.text;
         }
-        Text {
+        if root.text != "": Text {
             text: root.text;
-            font-size: root.font-size;
+            font-size: root.compact ? 12px : root.font-size;
             color: root.primary && root.enabled ? #000000 : Theme.text;
             vertical-alignment: center;
         }
