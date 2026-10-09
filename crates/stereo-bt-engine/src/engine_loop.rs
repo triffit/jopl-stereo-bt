@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 
 use stereo_bt_core::{DeviceEvent, DeviceId};
 
+use crate::TestSignal;
+
 use crate::{EngineConfig, EngineStatus, Platform, RestoreJournal, Supervisor, SupervisorError};
 
 /// Device events arrive in bursts (state change, then default change);
@@ -19,7 +21,7 @@ pub(crate) enum Command {
     Update(EngineConfig, Sender<Result<(), SupervisorError>>),
     Stop(Sender<Result<(), SupervisorError>>),
     MakeDefault(DeviceId, Sender<Result<(), SupervisorError>>),
-    ClickTrack(bool, Sender<Result<(), SupervisorError>>),
+    TestSignal(Option<TestSignal>, Sender<Result<(), SupervisorError>>),
     Isolate(Option<DeviceId>, Sender<Result<(), SupervisorError>>),
     UnmuteApp(u32, Sender<Result<(), SupervisorError>>),
     Shutdown,
@@ -56,8 +58,8 @@ pub(crate) fn run<P: Platform, J: RestoreJournal>(
             Ok(Command::MakeDefault(id, reply)) => {
                 let _ = reply.send(supervisor.make_default(&id));
             }
-            Ok(Command::ClickTrack(on, reply)) => {
-                let _ = reply.send(supervisor.set_click_track(on));
+            Ok(Command::TestSignal(signal, reply)) => {
+                let _ = reply.send(supervisor.set_test_signal(signal));
             }
             Ok(Command::Isolate(device, reply)) => {
                 let _ = reply.send(supervisor.isolate(device));

@@ -9,7 +9,7 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, Vec
 use stereo_bt_core::{ChannelMode, DeviceId};
 
 use crate::assistant::Phase;
-use crate::controller::{AssistantView, Controller, EngineControl, View};
+use crate::controller::{AssistantView, Controller, EngineControl, MeasureView, View};
 use crate::settings_store::SettingsStore;
 use crate::view_model::{BadgeKind, DeviceRow, StatusKind};
 
@@ -61,6 +61,9 @@ where
             }
         }
     });
+    window.on_measure_start(bind.action(Controller::start_measurement));
+    window.on_measure_apply(bind.action(Controller::measurement_apply));
+    window.on_measure_close(bind.action(Controller::measurement_close));
     window.on_assistant_start(bind.action(|c| c.start_assistant(Instant::now())));
     window.on_assistant_tap(bind.action(|c| c.assistant_tap(Instant::now())));
     window.on_assistant_next(bind.action(Controller::assistant_next));
@@ -242,6 +245,7 @@ fn apply_view(window: &MainWindow, rows: &VecModel<generated::DeviceRow>, view: 
     window.set_status_line(view.status_line.as_str().into());
     window.set_follow_system_volume(view.follow_system_volume);
     apply_assistant(window, view.assistant.as_ref());
+    apply_measurement(window, view.measurement.as_ref());
     match &view.muted_app {
         Some((text, pid)) => {
             window.set_muted_app_text(text.as_str().into());
@@ -305,6 +309,48 @@ fn apply_assistant(window: &MainWindow, assistant: Option<&AssistantView>) {
         })
         .collect();
     window.set_assistant_results(ModelRc::new(VecModel::from(results)));
+}
+
+fn apply_measurement(window: &MainWindow, measurement: Option<&MeasureView>) {
+    let (state, lines) = match measurement {
+        None => (generated::MeasureState::default(), Vec::new()),
+        Some(MeasureView::Running(text)) => (
+            generated::MeasureState {
+                active: true,
+                phase: 0,
+                text: text.as_str().into(),
+                can_apply: false,
+            },
+            Vec::new(),
+        ),
+        Some(MeasureView::Done {
+            lines,
+            advice,
+            can_apply,
+        }) => (
+            generated::MeasureState {
+                active: true,
+                phase: 1,
+                text: advice.as_str().into(),
+                can_apply: *can_apply,
+            },
+            lines
+                .iter()
+                .map(|l| SharedString::from(l.as_str()))
+                .collect(),
+        ),
+        Some(MeasureView::Failed(text)) => (
+            generated::MeasureState {
+                active: true,
+                phase: 2,
+                text: text.as_str().into(),
+                can_apply: false,
+            },
+            Vec::new(),
+        ),
+    };
+    window.set_measure(state);
+    window.set_measure_lines(ModelRc::new(VecModel::from(lines)));
 }
 
 fn to_i32(value: usize) -> i32 {

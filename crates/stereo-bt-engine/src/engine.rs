@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -7,8 +8,11 @@ use std::time::Duration;
 
 use stereo_bt_core::{DeviceEvent, DeviceId};
 
+use crate::calibration::{CalibrationRequest, CalibrationState};
 use crate::engine_loop::{self, Command, Shared};
-use crate::{EngineConfig, EngineStatus, Platform, RestoreJournal, Supervisor, SupervisorError};
+use crate::{
+    EngineConfig, EngineStatus, Platform, RestoreJournal, Supervisor, SupervisorError, TestSignal,
+};
 
 /// What the engine-thread setup returns: values to keep alive for the
 /// thread's lifetime (dropped after the supervisor), and the supervisor.
@@ -40,9 +44,56 @@ pub enum EngineError {
 /// (`start`, `update`, `stop`), which wait for the engine thread to apply them.
 /// Dropping the engine stops streaming and restores muted devices.
 pub struct Engine {
+    client: Client,
+    thread: Option<JoinHandle<()>>,
+    calibration: Arc<Mutex<CalibrationState>>,
+    calibration_cancel: Arc<AtomicBool>,
+    calibration_thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+/// Sends requests to the engine thread and reads its status; shared with
+/// helper threads such as the microphone measurement.
+#[derive(Clone)]
+pub(crate) struct Client {
     commands: Sender<Command>,
     shared: Arc<Mutex<Shared>>,
-    thread: Option<JoinHandle<()>>,
+}
+
+impl Client {
+    pub(crate) fn status(&self) -> EngineStatus {
+        self.lock_shared().status.clone()
+    }
+
+    pub(crate) fn isolate(&self, device: Option<DeviceId>) -> Result<(), EngineError> {
+        self.request(|reply| Command::Isolate(device, reply))
+    }
+
+    pub(crate) fn set_test_signal(&self, signal: Option<TestSignal>) -> Result<(), EngineError> {
+        self.request(|reply| Command::TestSignal(signal, reply))
+    }
+
+    pub(crate) fn make_default(&self, id: DeviceId) -> Result<(), EngineError> {
+        self.request(|reply| Command::MakeDefault(id, reply))
+    }
+
+    fn request(
+        &self,
+        make: impl FnOnce(Sender<Result<(), SupervisorError>>) -> Command,
+    ) -> Result<(), EngineError> {
+        let (reply, reply_rx) = mpsc::channel();
+        self.commands
+            .send(make(reply))
+            .map_err(|_| EngineError::Stopped)?;
+        match reply_rx.recv_timeout(REPLY_TIMEOUT) {
+            Ok(result) => Ok(result?),
+            Err(RecvTimeoutError::Timeout) => Err(EngineError::Timeout),
+            Err(RecvTimeoutError::Disconnected) => Err(EngineError::Stopped),
+        }
+    }
+
+    fn lock_shared(&self) -> std::sync::MutexGuard<'_, Shared> {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 impl Engine {
@@ -96,9 +147,11 @@ impl Engine {
                 }
             })?;
         let engine = Self {
-            commands,
-            shared,
+            client: Client { commands, shared },
             thread: Some(thread),
+            calibration: Arc::default(),
+            calibration_cancel: Arc::default(),
+            calibration_thread: Mutex::default(),
         };
         match ready_rx.recv_timeout(REPLY_TIMEOUT) {
             Ok(Ok(())) => Ok(engine),
@@ -150,7 +203,17 @@ impl Engine {
     ///
     /// Returns [`EngineError`] when the click track cannot be started.
     pub fn set_click_track(&self, on: bool) -> Result<(), EngineError> {
-        self.request(|reply| Command::ClickTrack(on, reply))
+        self.client.set_test_signal(on.then_some(TestSignal::Click))
+    }
+
+    /// Plays a test signal on the default device (`None`: stop); it reaches
+    /// every device through its real pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] when the test signal cannot be started.
+    pub fn set_test_signal(&self, signal: Option<TestSignal>) -> Result<(), EngineError> {
+        self.client.set_test_signal(signal)
     }
 
     /// Leaves only `device` audible for assisted sync (`None`: all again).
@@ -159,7 +222,7 @@ impl Engine {
     ///
     /// Returns [`EngineError`] when devices cannot be controlled.
     pub fn isolate(&self, device: Option<DeviceId>) -> Result<(), EngineError> {
-        self.request(|reply| Command::Isolate(device, reply))
+        self.client.isolate(device)
     }
 
     /// Unmutes process `pid` on the default device in the Windows volume mixer.
@@ -171,42 +234,75 @@ impl Engine {
         self.request(|reply| Command::UnmuteApp(pid, reply))
     }
 
+    /// Starts measuring every playing device with the microphone in the
+    /// background (see [`Engine::calibration`] for progress and the result).
+    /// Plays test chirps and may change the default device.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] when the measurement thread cannot start.
+    #[cfg(windows)]
+    pub fn start_calibration(&self, request: CalibrationRequest) -> Result<(), EngineError> {
+        self.cancel_calibration();
+        self.calibration_cancel.store(false, Ordering::Relaxed);
+        *lock(&self.calibration) = CalibrationState::Running("Starting the microphone…".into());
+        let client = self.client.clone();
+        let state = Arc::clone(&self.calibration);
+        let cancel = Arc::clone(&self.calibration_cancel);
+        let thread = thread::Builder::new()
+            .name("calibration".into())
+            .spawn(move || crate::calibration::run(&client, &request, &state, &cancel))?;
+        *lock(&self.calibration_thread) = Some(thread);
+        Ok(())
+    }
+
+    /// Progress or result of the microphone measurement.
+    #[must_use]
+    pub fn calibration(&self) -> CalibrationState {
+        lock(&self.calibration).clone()
+    }
+
+    /// Stops a running measurement (test signal off, all devices audible)
+    /// and forgets its result.
+    pub fn cancel_calibration(&self) {
+        self.calibration_cancel.store(true, Ordering::Relaxed);
+        if let Some(thread) = lock(&self.calibration_thread).take() {
+            // A panicked measurement thread has already stopped.
+            let _ = thread.join();
+        }
+        *lock(&self.calibration) = CalibrationState::Idle;
+    }
+
     /// The latest status snapshot (refreshed about every 100 ms).
     #[must_use]
     pub fn status(&self) -> EngineStatus {
-        self.lock_shared().status.clone()
+        self.client.status()
     }
 
     /// The latest error from reacting to a device change, if any.
     #[must_use]
     pub fn last_error(&self) -> Option<String> {
-        self.lock_shared().last_error.clone()
+        self.client.lock_shared().last_error.clone()
     }
 
     fn request(
         &self,
         make: impl FnOnce(Sender<Result<(), SupervisorError>>) -> Command,
     ) -> Result<(), EngineError> {
-        let (reply, reply_rx) = mpsc::channel();
-        self.commands
-            .send(make(reply))
-            .map_err(|_| EngineError::Stopped)?;
-        match reply_rx.recv_timeout(REPLY_TIMEOUT) {
-            Ok(result) => Ok(result?),
-            Err(RecvTimeoutError::Timeout) => Err(EngineError::Timeout),
-            Err(RecvTimeoutError::Disconnected) => Err(EngineError::Stopped),
-        }
+        self.client.request(make)
     }
+}
 
-    fn lock_shared(&self) -> std::sync::MutexGuard<'_, Shared> {
-        self.shared.lock().unwrap_or_else(PoisonError::into_inner)
-    }
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl Drop for Engine {
     fn drop(&mut self) {
+        // The measurement talks to the engine thread; end it first.
+        self.cancel_calibration();
         // The thread may already have exited; then there is nothing to stop.
-        let _ = self.commands.send(Command::Shutdown);
+        let _ = self.client.commands.send(Command::Shutdown);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }

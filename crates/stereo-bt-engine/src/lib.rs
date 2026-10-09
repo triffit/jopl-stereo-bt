@@ -13,11 +13,13 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+mod calibration;
 mod click_track;
 mod engine;
 mod engine_config;
 mod engine_loop;
 mod fan_out;
+mod mic_timeline;
 mod output_config;
 mod output_controls;
 mod platform;
@@ -34,6 +36,8 @@ mod tuning;
 mod wasapi_backend;
 
 pub use backend::{Backend, CaptureStream, RenderSink};
+pub use calibration::{CalibrationReport, CalibrationRequest, CalibrationState};
+pub use click_track::TestSignal;
 pub use engine::{Engine, EngineError};
 pub use engine_config::EngineConfig;
 pub use output_config::OutputConfig;

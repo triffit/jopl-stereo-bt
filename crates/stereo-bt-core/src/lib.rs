@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+mod auto_calibration;
 mod channel_mode;
 mod click;
 mod delay;
@@ -26,6 +27,10 @@ mod system_volume;
 mod tap_analysis;
 mod volume;
 
+pub use auto_calibration::{
+    Arrival, CalibrationOutcome, DeviceLatency, align_to_slowest, find_arrival, plan_first_round,
+    plan_second_round,
+};
 pub use channel_mode::ChannelMode;
 pub use click::ClickGenerator;
 pub use delay::Delay;

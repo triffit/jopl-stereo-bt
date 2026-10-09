@@ -5,7 +5,9 @@
 use std::time::{Duration, Instant};
 
 use stereo_bt_core::{ChannelMode, Delay, DeviceId, Volume};
-use stereo_bt_engine::{Engine, EngineConfig, EngineStatus};
+use stereo_bt_engine::{
+    CalibrationReport, CalibrationRequest, CalibrationState, Engine, EngineConfig, EngineStatus,
+};
 
 use crate::assistant::{Assistant, Phase, Step, TAPS_WANTED};
 use crate::settings::{DeviceSettings, Settings};
@@ -25,6 +27,9 @@ pub(crate) trait EngineControl {
     fn set_click_track(&self, on: bool) -> Result<(), String>;
     fn isolate(&self, device: Option<DeviceId>) -> Result<(), String>;
     fn unmute_app(&self, pid: u32) -> Result<(), String>;
+    fn start_calibration(&self, request: CalibrationRequest) -> Result<(), String>;
+    fn calibration(&self) -> CalibrationState;
+    fn cancel_calibration(&self);
     fn status(&self) -> EngineStatus;
     fn last_error(&self) -> Option<String>;
 }
@@ -58,6 +63,18 @@ impl EngineControl for Engine {
         Engine::unmute_app(self, pid).map_err(|e| e.to_string())
     }
 
+    fn start_calibration(&self, request: CalibrationRequest) -> Result<(), String> {
+        Engine::start_calibration(self, request).map_err(|e| e.to_string())
+    }
+
+    fn calibration(&self) -> CalibrationState {
+        Engine::calibration(self)
+    }
+
+    fn cancel_calibration(&self) {
+        Engine::cancel_calibration(self);
+    }
+
     fn status(&self) -> EngineStatus {
         Engine::status(self)
     }
@@ -81,6 +98,21 @@ pub(crate) struct ResultLine {
     pub(crate) name: String,
     pub(crate) text: String,
     pub(crate) warning: bool,
+}
+
+/// What the microphone measurement shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MeasureView {
+    /// Measuring; the text says what is happening.
+    Running(String),
+    /// Finished: what was measured, and the advice.
+    Done {
+        lines: Vec<String>,
+        advice: String,
+        can_apply: bool,
+    },
+    /// Stopped with an explanation.
+    Failed(String),
 }
 
 /// What the sync assistant shows.
@@ -113,6 +145,7 @@ pub(crate) struct View {
     pub(crate) assistant: Option<AssistantView>,
     /// Warning about an app muted on the default device, with its pid.
     pub(crate) muted_app: Option<(String, u32)>,
+    pub(crate) measurement: Option<MeasureView>,
 }
 
 pub(crate) struct Controller<E: EngineControl, S: SettingsStore> {
@@ -274,6 +307,142 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
             error: self.error.clone().or_else(|| self.engine.last_error()),
             assistant: self.assistant.as_ref().map(|a| self.assistant_view(a)),
             muted_app: self.muted_app_warning(),
+            measurement: self.measure_view(),
+        }
+    }
+
+    /// Measures every playing device with the microphone and works out the
+    /// best default device and delays (runs in the background).
+    pub(crate) fn start_measurement(&mut self) {
+        if !self.running {
+            self.error = Some("Start streaming first, then measure with the microphone.".into());
+            return;
+        }
+        self.assistant_close();
+        let request = CalibrationRequest {
+            delays: self
+                .settings
+                .devices
+                .iter()
+                .map(|d| (d.id.clone(), d.delay))
+                .collect(),
+            include_default: self.settings.include_default,
+        };
+        match self.engine.start_calibration(request) {
+            Ok(()) => self.error = None,
+            Err(e) => self.error = Some(format!("The measurement could not start: {e}")),
+        }
+    }
+
+    /// Applies the measured advice: default device and delays.
+    pub(crate) fn measurement_apply(&mut self) {
+        let CalibrationState::Done(report) = self.engine.calibration() else {
+            return;
+        };
+        let (default, delays) = match report.outcome {
+            stereo_bt_core::CalibrationOutcome::Aligned { delays } => (None, delays),
+            stereo_bt_core::CalibrationOutcome::Best {
+                default, delays, ..
+            } => (Some(default), delays),
+            stereo_bt_core::CalibrationOutcome::TryDefault(_) => return,
+        };
+        if let Some(default) = default
+            && self.status.source.as_ref() != Some(&default)
+            && let Err(e) = self.engine.make_default(&default)
+        {
+            self.error = Some(format!("Could not make it the default device: {e}"));
+            return;
+        }
+        for (id, delay) in delays {
+            self.edit(&id, |d| {
+                d.delay = delay;
+                d.enabled = true;
+            });
+        }
+        self.engine.cancel_calibration();
+        self.status = self.engine.status();
+    }
+
+    /// Closes the measurement (cancels it when still running).
+    pub(crate) fn measurement_close(&mut self) {
+        self.engine.cancel_calibration();
+    }
+
+    fn measure_view(&self) -> Option<MeasureView> {
+        match self.engine.calibration() {
+            CalibrationState::Idle => None,
+            CalibrationState::Running(text) => Some(MeasureView::Running(text)),
+            CalibrationState::Failed(text) => Some(MeasureView::Failed(text)),
+            CalibrationState::Done(report) => Some(self.report_view(&report)),
+        }
+    }
+
+    fn report_view(&self, report: &CalibrationReport) -> MeasureView {
+        let name = |id: &DeviceId| {
+            self.settings
+                .device(id)
+                .map_or_else(|| id.to_string(), |d| d.name.clone())
+        };
+        let mut lines = vec![format!("Microphone: {}", report.microphone)];
+        for measured in &report.measured {
+            let role = if measured.is_source {
+                " (default device)"
+            } else {
+                ""
+            };
+            lines.push(format!(
+                "{}{role}: heard after {:.0} ms",
+                name(&measured.id),
+                measured.measured_ms
+            ));
+        }
+        for id in &report.not_heard {
+            lines.push(format!(
+                "{}: not heard; turn it up or move it closer to the microphone",
+                name(id)
+            ));
+        }
+        let list = |delays: &[(DeviceId, stereo_bt_core::Delay)]| {
+            delays
+                .iter()
+                .map(|(id, delay)| format!("{} {} ms", name(id), delay.as_millis()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let (advice, can_apply) = match &report.outcome {
+            stereo_bt_core::CalibrationOutcome::Aligned { delays } if delays.is_empty() => (
+                "Only the default device was heard, so there is nothing to align.".to_owned(),
+                false,
+            ),
+            stereo_bt_core::CalibrationOutcome::Aligned { delays } => (
+                format!("Keep the current default device. Delays: {}.", list(delays)),
+                true,
+            ),
+            stereo_bt_core::CalibrationOutcome::Best {
+                default,
+                delays,
+                overhead_ms,
+                behind_ms,
+            } => {
+                let mut advice = format!(
+                    "Make {} the default device (the slowest by itself). Delays: {}.",
+                    name(default),
+                    list(delays)
+                );
+                if *behind_ms > 5.0 {
+                    let lag = format!(
+                        " The other devices will still play about {behind_ms:.0} ms after it, because the app's own processing adds {overhead_ms:.0} ms. For perfect sync, use a spare output device as the muted default."
+                    );
+                    advice += &lag;
+                }
+                (advice, true)
+            }
+            stereo_bt_core::CalibrationOutcome::TryDefault(_) => (String::new(), false),
+        };
+        MeasureView::Done {
+            lines,
+            advice,
+            can_apply,
         }
     }
 
@@ -494,6 +663,8 @@ mod tests {
         updated: Vec<EngineConfig>,
         stopped: usize,
         made_default: Vec<DeviceId>,
+        calibration: CalibrationState,
+        calibration_requests: Vec<CalibrationRequest>,
         click_track: bool,
         isolated: Vec<Option<DeviceId>>,
         fail: bool,
@@ -546,6 +717,21 @@ mod tests {
             let mut log = self.0.borrow_mut();
             log.status.muted_apps.retain(|app| app.pid != pid);
             Ok(())
+        }
+
+        fn start_calibration(&self, request: CalibrationRequest) -> Result<(), String> {
+            let mut log = self.0.borrow_mut();
+            log.calibration_requests.push(request);
+            log.calibration = CalibrationState::Running("Measuring…".into());
+            Ok(())
+        }
+
+        fn calibration(&self) -> CalibrationState {
+            self.0.borrow().calibration.clone()
+        }
+
+        fn cancel_calibration(&self) {
+            self.0.borrow_mut().calibration = CalibrationState::Idle;
         }
 
         fn status(&self) -> EngineStatus {
@@ -827,6 +1013,121 @@ mod tests {
         c.unmute_app(42);
 
         assert_eq!(c.view().muted_app, None);
+    }
+
+    fn report(outcome: stereo_bt_core::CalibrationOutcome) -> CalibrationState {
+        CalibrationState::Done(CalibrationReport {
+            microphone: "Mic".into(),
+            measured: vec![
+                stereo_bt_core::DeviceLatency {
+                    id: id("A"),
+                    is_source: true,
+                    measured_ms: 76.3,
+                    delay: stereo_bt_core::Delay::ZERO,
+                },
+                stereo_bt_core::DeviceLatency {
+                    id: id("B"),
+                    is_source: false,
+                    measured_ms: 35.3,
+                    delay: stereo_bt_core::Delay::ZERO,
+                },
+            ],
+            not_heard: Vec::new(),
+            outcome,
+            heard: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn measurement_needs_streaming() {
+        let (mut c, engine, _) = controller();
+
+        c.start_measurement();
+
+        assert!(engine.0.borrow().calibration_requests.is_empty());
+        assert!(c.view().error.unwrap().contains("Start streaming"));
+    }
+
+    #[test]
+    fn measurement_sends_current_delays_and_shows_progress() {
+        let epoch = Instant::now();
+        let (mut c, engine) = streaming(epoch);
+        c.set_delay(&id("B"), 12);
+
+        c.start_measurement();
+
+        let log = engine.0.borrow();
+        let request = &log.calibration_requests[0];
+        assert!(request.include_default);
+        assert!(
+            request
+                .delays
+                .contains(&(id("B"), stereo_bt_core::Delay::from_millis(12).unwrap()))
+        );
+        drop(log);
+        assert_eq!(
+            c.view().measurement,
+            Some(MeasureView::Running("Measuring…".into()))
+        );
+    }
+
+    #[test]
+    fn aligned_result_is_explained_and_applied() {
+        let epoch = Instant::now();
+        let (mut c, engine) = streaming(epoch);
+        engine.0.borrow_mut().calibration = report(stereo_bt_core::CalibrationOutcome::Aligned {
+            delays: vec![(id("B"), stereo_bt_core::Delay::from_millis(41).unwrap())],
+        });
+
+        let Some(MeasureView::Done {
+            lines,
+            advice,
+            can_apply,
+        }) = c.view().measurement
+        else {
+            panic!("expected a result");
+        };
+        assert!(lines.contains(&"A (default device): heard after 76 ms".to_owned()));
+        assert_eq!(advice, "Keep the current default device. Delays: B 41 ms.");
+        assert!(can_apply);
+
+        c.measurement_apply();
+
+        assert_eq!(c.view().rows[1].delay_ms, 41);
+        assert_eq!(c.view().measurement, None);
+    }
+
+    #[test]
+    fn best_result_switches_the_default_and_warns_when_others_lag() {
+        let epoch = Instant::now();
+        let (mut c, engine) = streaming(epoch);
+        engine.0.borrow_mut().calibration = report(stereo_bt_core::CalibrationOutcome::Best {
+            default: id("B"),
+            delays: vec![(id("A"), stereo_bt_core::Delay::ZERO)],
+            overhead_ms: 60.0,
+            behind_ms: 32.0,
+        });
+
+        let Some(MeasureView::Done { advice, .. }) = c.view().measurement else {
+            panic!("expected a result");
+        };
+        assert!(advice.starts_with("Make B the default device"));
+        assert!(advice.contains("about 32 ms after it"));
+
+        c.measurement_apply();
+
+        assert_eq!(engine.0.borrow().made_default, vec![id("B")]);
+    }
+
+    #[test]
+    fn closing_the_measurement_cancels_it() {
+        let epoch = Instant::now();
+        let (mut c, _engine) = streaming(epoch);
+        c.start_measurement();
+
+        c.measurement_close();
+
+        assert_eq!(c.view().measurement, None);
     }
 
     #[test]

@@ -35,6 +35,68 @@ export struct AssistantState {
     can-next: bool,
 }
 
+// Microphone measurement; phase 0 running, 1 result, 2 failed.
+export struct MeasureState {
+    active: bool,
+    phase: int,
+    // Progress, advice or failure text.
+    text: string,
+    can-apply: bool,
+}
+
+component MeasurePanel inherits Rectangle {
+    in property <MeasureState> state;
+    in property <[string]> lines;
+    callback apply();
+    callback close();
+
+    border-radius: Theme.radius;
+    background: Theme.card;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 12px;
+        Text {
+            text: root.state.phase == 0 ? "Measuring with the microphone" : root.state.phase == 1 ? "Measurement result" : "Measurement stopped";
+            color: Theme.text;
+            font-size: 18px;
+            font-weight: 700;
+        }
+        if root.state.phase == 0: Text {
+            text: "Each device plays short sweeps in turn while the microphone listens. Keep quiet and pause other audio.";
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+        for line in root.lines: Text {
+            text: line;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.state.text;
+            color: root.state.phase == 2 ? Theme.warning : root.state.phase == 1 ? Theme.accent-light : Theme.text-muted;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: end;
+            if root.state.can-apply: OutlineButton {
+                text: "Apply";
+                clicked => { root.apply(); }
+            }
+            OutlineButton {
+                text: root.state.phase == 0 ? "Cancel" : "Close";
+                clicked => { root.close(); }
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+        }
+    }
+}
+
 export struct AssistantResult {
     name: string,
     text: string,
@@ -338,12 +400,17 @@ export component MainWindow inherits Window {
     in property <string> muted-app-text;
     in property <int> muted-app-pid;
     in property <[AssistantResult]> assistant-results;
+    in property <MeasureState> measure;
+    in property <[string]> measure-lines;
     // Current Windows volume, e.g. "45 %"; empty when not following.
     in property <string> system-volume-text;
 
     callback toggle-running();
     callback follow-system-volume-changed(bool);
     callback unmute-app(int);
+    callback measure-start();
+    callback measure-apply();
+    callback measure-close();
     callback assistant-start();
     callback assistant-tap();
     callback assistant-next();
@@ -423,8 +490,13 @@ export component MainWindow inherits Window {
                 HorizontalLayout {
                     spacing: 10px;
                     OutlineButton {
+                        text: "Measure with mic";
+                        enabled: root.running && !root.assistant.active && !root.measure.active;
+                        clicked => { root.measure-start(); }
+                    }
+                    OutlineButton {
                         text: "Sync assistant";
-                        enabled: root.running && !root.assistant.active;
+                        enabled: root.running && !root.assistant.active && !root.measure.active;
                         clicked => { root.assistant-start(); }
                     }
                     OutlineButton {
@@ -534,6 +606,14 @@ export component MainWindow inherits Window {
             }
         }
 
+        if root.measure.active: MeasurePanel {
+            vertical-stretch: 1;
+            state: root.measure;
+            lines: root.measure-lines;
+            apply => { root.measure-apply(); }
+            close => { root.measure-close(); }
+        }
+
         if root.assistant.active && root.assistant.phase != 2: AssistantPanel {
             vertical-stretch: 1;
             state: root.assistant;
@@ -545,7 +625,7 @@ export component MainWindow inherits Window {
             cancel => { root.assistant-close(); }
         }
 
-        if !root.assistant.active || root.assistant.phase == 2: ScrollView {
+        if !root.measure.active && (!root.assistant.active || root.assistant.phase == 2): ScrollView {
             vertical-stretch: 1;
             VerticalLayout {
                 spacing: 12px;

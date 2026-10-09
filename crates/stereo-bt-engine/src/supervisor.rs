@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use stereo_bt_core::{DeviceId, DeviceInfo, MutedApp, SystemVolume};
 
-use crate::click_track::ClickTrack;
+use crate::click_track::{ClickTrack, TestSignal};
 use crate::{
     Backend, EngineConfig, OutputConfig, OutputStatus, Platform, RestoreJournal, Session,
     StreamState,
@@ -17,6 +17,8 @@ const FULL_VOLUME: f32 = 0.999;
 
 /// Time between clicks of the assisted-sync click track.
 pub(crate) const CLICK_PERIOD_MILLIS: u32 = 1_000;
+/// Time between chirps when measuring with a microphone.
+pub(crate) const CHIRP_PERIOD_MILLIS: u32 = 700;
 
 /// How long a failed device or capture stream waits before it is retried.
 /// Bluetooth devices often need a moment after a dropout or profile switch.
@@ -106,7 +108,7 @@ pub struct Supervisor<P: Platform, J: RestoreJournal> {
     session_starts: u64,
     devices: Vec<DeviceInfo>,
     system_volume: Option<SystemVolume>,
-    click_wanted: bool,
+    test_signal: Option<TestSignal>,
     click_track: Option<ClickTrack>,
     isolated: Option<DeviceId>,
     muted_apps: Vec<MutedApp>,
@@ -134,7 +136,7 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
             session_starts: 0,
             devices: Vec::new(),
             system_volume: None,
-            click_wanted: false,
+            test_signal: None,
             click_track: None,
             isolated: None,
             muted_apps: Vec::new(),
@@ -162,7 +164,7 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
     /// Returns [`SupervisorError`] when the journal cannot be written.
     pub fn stop(&mut self) -> Result<(), SupervisorError> {
         self.running = false;
-        self.click_wanted = false;
+        self.test_signal = None;
         self.isolated = None;
         self.reconcile()
     }
@@ -173,7 +175,16 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
     ///
     /// Returns [`SupervisorError`] when the click thread cannot be started.
     pub fn set_click_track(&mut self, on: bool) -> Result<(), SupervisorError> {
-        self.click_wanted = on;
+        self.set_test_signal(on.then_some(TestSignal::Click))
+    }
+
+    /// Plays `signal` on the default device (`None`: stop).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SupervisorError`] when the test-signal thread cannot be started.
+    pub fn set_test_signal(&mut self, signal: Option<TestSignal>) -> Result<(), SupervisorError> {
+        self.test_signal = signal;
         self.reconcile_click_track()
     }
 
@@ -439,21 +450,30 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
 
     /// Keeps the click track playing on the current source while wanted.
     fn reconcile_click_track(&mut self) -> Result<(), SupervisorError> {
-        let source = self
+        let wanted = self
             .active
             .as_ref()
-            .filter(|_| self.click_wanted)
-            .map(|a| a.source.clone());
-        match source {
+            .zip(self.test_signal)
+            .map(|(a, signal)| (a.source.clone(), signal));
+        match wanted {
             None => self.click_track = None,
-            Some(source) => {
-                if self.click_track.as_ref().map(ClickTrack::device) != Some(&source) {
+            Some((source, signal)) => {
+                let current = self
+                    .click_track
+                    .as_ref()
+                    .map(|t| (t.device().clone(), t.signal()));
+                if current != Some((source.clone(), signal)) {
                     self.click_track = None;
+                    let period = match signal {
+                        TestSignal::Click => CLICK_PERIOD_MILLIS,
+                        TestSignal::Chirp => CHIRP_PERIOD_MILLIS,
+                    };
                     let track = ClickTrack::start(
                         self.platform.backend(),
                         source,
                         self.platform.sample_rate(),
-                        CLICK_PERIOD_MILLIS,
+                        signal,
+                        period,
                     )
                     .map_err(spawn_error)?;
                     self.click_track = Some(track);

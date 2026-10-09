@@ -10,8 +10,9 @@ use std::time::{Duration, Instant};
 
 use stereo_bt_core::Frame;
 use stereo_bt_wasapi::{
-    ComGuard, DeviceWatcher, LoopbackCapture, MmcssGuard, RenderStream, default_output_id,
-    is_muted, list_output_devices, muted_apps, set_default_output, set_muted, system_volume,
+    ComGuard, DeviceWatcher, LoopbackCapture, MicCapture, MmcssGuard, RenderStream,
+    default_output_id, is_muted, list_output_devices, muted_apps, set_default_output, set_muted,
+    system_volume,
 };
 
 #[test]
@@ -141,4 +142,21 @@ fn muted_apps_of_default_device_can_be_listed() {
     let muted = muted_apps(&default).unwrap();
 
     assert!(muted.iter().all(|app| app.pid != 0 && !app.name.is_empty()));
+}
+
+#[test]
+#[ignore = "needs a microphone"]
+fn microphone_records_in_raw_mode() {
+    let _com = ComGuard::init_mta().unwrap();
+    let mut mic = MicCapture::open().unwrap();
+    mic.start().unwrap();
+
+    let mut frames = 0;
+    let deadline = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < deadline {
+        frames += mic.read(20).unwrap().len();
+    }
+
+    assert!(!mic.name().is_empty());
+    assert!(frames > 48_000 / 10, "{frames} frames in 300 ms");
 }

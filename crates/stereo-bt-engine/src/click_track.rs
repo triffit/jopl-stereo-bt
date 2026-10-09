@@ -9,6 +9,15 @@ use stereo_bt_core::{ClickGenerator, DeviceId, Frame, SampleRate};
 use crate::backend::{Backend, RenderSink};
 use crate::tuning::WAIT_TIMEOUT_MS;
 
+/// Which test signal a [`ClickTrack`] plays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestSignal {
+    /// Short clicks every second, for listening (assisted sync).
+    Click,
+    /// Frequency sweeps, for measuring with a microphone.
+    Chirp,
+}
+
 /// How many recent click times are kept for tap analysis.
 const KEPT_CLICKS: usize = 64;
 
@@ -21,17 +30,19 @@ const KEPT_CLICKS: usize = 64;
 /// taps can be related to it. Stops when dropped.
 pub(crate) struct ClickTrack {
     device: DeviceId,
+    signal: TestSignal,
     stop: Arc<AtomicBool>,
     clicks: Arc<Mutex<VecDeque<Instant>>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl ClickTrack {
-    /// Starts clicking on `device` every `period_millis` milliseconds.
+    /// Starts playing `signal` on `device`, one burst every `period_millis`.
     pub(crate) fn start<B: Backend>(
         backend: &Arc<B>,
         device: DeviceId,
         sample_rate: SampleRate,
+        signal: TestSignal,
         period_millis: u32,
     ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
@@ -46,18 +57,16 @@ impl ClickTrack {
                 .spawn(move || {
                     // A device that fails simply produces no clicks; the
                     // assistant then gets no taps and says so.
-                    let _ = run(
-                        &*backend,
-                        &device,
-                        sample_rate,
-                        period_millis,
-                        &clicks,
-                        &stop,
-                    );
+                    let generator = match signal {
+                        TestSignal::Click => ClickGenerator::new(sample_rate, period_millis),
+                        TestSignal::Chirp => ClickGenerator::chirp(sample_rate, period_millis),
+                    };
+                    let _ = run(&*backend, &device, generator, sample_rate, &clicks, &stop);
                 })?
         };
         Ok(Self {
             device,
+            signal,
             stop,
             clicks,
             thread: Some(thread),
@@ -67,6 +76,11 @@ impl ClickTrack {
     /// The device the clicks are played on.
     pub(crate) fn device(&self) -> &DeviceId {
         &self.device
+    }
+
+    /// The signal being played.
+    pub(crate) fn signal(&self) -> TestSignal {
+        self.signal
     }
 
     /// When recent clicks leave the device, oldest first.
@@ -92,14 +106,13 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 fn run<B: Backend>(
     backend: &B,
     device: &DeviceId,
+    mut generator: ClickGenerator,
     sample_rate: SampleRate,
-    period_millis: u32,
     clicks: &Mutex<VecDeque<Instant>>,
     stop: &AtomicBool,
 ) -> Result<(), B::Error> {
     let _guard = backend.enter_thread()?;
     let mut render = backend.open_render(device)?;
-    let mut generator = ClickGenerator::new(sample_rate, period_millis);
     let mut block = vec![Frame::SILENCE; render.buffer_frames()];
     render.start()?;
     while !stop.load(Ordering::Relaxed) {
@@ -143,7 +156,14 @@ mod tests {
     #[test]
     fn records_one_emission_time_per_click() {
         let device = DeviceId::new("A").unwrap();
-        let track = ClickTrack::start(&backend(), device, SampleRate::HZ_48000, 50).unwrap();
+        let track = ClickTrack::start(
+            &backend(),
+            device,
+            SampleRate::HZ_48000,
+            TestSignal::Click,
+            50,
+        )
+        .unwrap();
 
         thread::sleep(Duration::from_millis(400));
         let clicks = track.clicks();

@@ -37,10 +37,10 @@ and do not compensate for the different latency of each Bluetooth device.
 | F11 | Make default | Switch the Windows default output device from a device card. |
 | F12 | Assisted sync | Click track played into the default device (so it reaches every device through its real path); tap along per isolated device, get suggested delays, then fine-tune by ear with all devices clicking. |
 | F13 | Muted-app warning | Warns when an app plays on the default device but is muted for it in the Windows volume mixer (its sound then reaches no device), with an Unmute button. |
+| F14 | Measure with mic | Plays sweeps on one device at a time, finds them in a RAW microphone recording, and recommends the default device (the slowest by itself) and delays; verified within ~1 ms on hardware. |
 
 ## Later (v2+)
 
-- Automatic latency measurement via microphone.
 - Per-app capture (process loopback, Windows 10 2004+) instead of whole-system audio.
 - Auto-start with Windows.
 

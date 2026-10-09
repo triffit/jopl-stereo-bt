@@ -87,6 +87,22 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   (reference − device + current delay; flag when < 0: make the slowest device the default).
   Then fine-tune phase: all devices click, user adjusts delays by ear.
 
+## Microphone measurement (F14)
+
+- `MicCapture` (wasapi) opens the default mic in **RAW** mode (voice processing gated the
+  chirps to silence otherwise) and skips Bluetooth hands-free mics (≤ 16 kHz).
+- `Engine::start_calibration` runs `calibration.rs` on its own thread via `Client` commands:
+  per device isolate → 1.4 s warm-up (BT wake-up gives bogus first readings) → 5 chirps
+  (`TestSignal::Chirp`, 700 ms) → `MicTimeline::latencies_ms` (cross-correlation,
+  `find_arrival` quality ≥ 12) → `robust_latency` (≥ 3 within ±10 ms).
+- Mic packets are dated `now − (len + queued)`; the **earliest** implied start wins (jitter only
+  makes packets look late). Capture loops must **drain** all queued packets per wake-up —
+  reading one per wake-up fell behind and lost audio on hardware.
+- Planning (core `auto_calibration.rs`): round 1 with the current default; if a target is later
+  than the default even undelayed, round 2 with that target as default yields the app's
+  overhead (same device native vs. through the pipeline), then the best default and delays.
+- Manual check: `cargo run --release -p stereo-bt-engine --example calibrate [follow]`.
+
 ## Sync model
 
 - Every output keeps its queue at the same cushion (40 ms, `tuning.rs`); priming aligns to
