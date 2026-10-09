@@ -36,9 +36,10 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   `%APPDATA%\JOPL-StereoBT\settings.toml`, per-device by endpoint id). `ui.rs` is glue only;
   generated Slint code lives in a lint-exempt `generated` module. UI edits are coalesced and
   pushed to the engine on the 100 ms timer; settings saved 1 s after the last edit and on exit.
-- Slint licence (Royalty-free Desktop 2.0): the About popup **must** keep `AboutSlint`.
+- Slint licence (Royalty-free Desktop 2.0): the About section on the Settings page **must** keep `AboutSlint`.
 - Tray (F7, `tray.rs`, `tray-icon` crate): polled on the UI timer; closing the window while
-  streaming hides to tray, closing while stopped (or without a tray) quits. Event loop runs via
+  playing hides to tray when "Keep playing when the window is closed" is on (default);
+  otherwise, while stopped, or without a tray, it quits. Event loop runs via
   `run_event_loop_until_quit`. Icon drawn in code (`icon.rs`).
 - Exe icon + version info: `build.rs` draws the icon with `src/icon.rs` (shared with the tray),
   encodes it with `src/ico.rs` into `OUT_DIR/app.ico` and embeds it via `winresource`.
@@ -180,7 +181,7 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 
 ## Conventions
 
-- Workspace lints: `unsafe_code = "forbid"`, `missing_docs`, clippy `pedantic`,
+- Workspace lints: `unsafe_code = "deny"` (core and engine `forbid` it), `missing_docs`, clippy `pedantic`,
   `unwrap_used`/`expect_used`/`panic` warn (allowed in tests via `clippy.toml`).
 - Real-time path (`OutputChain`, `DelayLine`, render threads): no allocation, locks, I/O or
   logging after construction.

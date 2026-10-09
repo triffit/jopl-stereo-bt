@@ -94,14 +94,20 @@ impl RestoreJournal for FileRestoreJournal {
 }
 
 fn read_lines(path: &Path) -> io::Result<Vec<String>> {
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(text.lines().map(str::to_owned).collect()),
+    // Lossy: unreadable bytes only spoil their own line, which is then skipped,
+    // instead of keeping the engine from starting.
+    match fs::read(path) {
+        Ok(bytes) => Ok(String::from_utf8_lossy(&bytes)
+            .lines()
+            .map(str::to_owned)
+            .collect()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(error) => Err(error),
     }
 }
 
-/// Writes one entry per line; an empty list removes the file.
+/// Writes one entry per line, atomically (temp file + rename), so a crash
+/// mid-write never leaves a half-written journal; an empty list removes the file.
 fn write_lines(path: &Path, lines: impl Iterator<Item = String>) -> io::Result<()> {
     let mut text = String::new();
     for line in lines {
@@ -117,7 +123,9 @@ fn write_lines(path: &Path, lines: impl Iterator<Item = String>) -> io::Result<(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, text)
+    let temp = path.with_extension("tmp");
+    fs::write(&temp, text)?;
+    fs::rename(&temp, path)
 }
 
 #[cfg(test)]
@@ -166,6 +174,34 @@ mod tests {
             vec![(id("{a}"), 0.1), (id("{b}"), 0.44)]
         );
         journal.save_volumes(&[]).unwrap();
+    }
+
+    #[test]
+    fn unreadable_bytes_only_skip_their_own_line() {
+        let journal = journal("bytes");
+        fs::create_dir_all(journal.mutes.parent().unwrap()).unwrap();
+        // Two bytes that are never valid UTF-8 (0xFF, 0xFE) on the middle line.
+        let mut bytes = b"{a}\n".to_vec();
+        bytes.extend_from_slice(&[0xFF, 0xFE]);
+        bytes.extend_from_slice(b" garbage\n{b}\n");
+        fs::write(&journal.mutes, bytes).unwrap();
+
+        let loaded = journal.load_mutes().unwrap();
+
+        assert!(loaded.contains(&id("{a}")) && loaded.contains(&id("{b}")));
+        journal.save_mutes(&[]).unwrap();
+    }
+
+    #[test]
+    fn saving_replaces_the_journal_and_leaves_no_temp_file() {
+        let journal = journal("replace");
+        journal.save_mutes(&[id("{a}"), id("{b}")]).unwrap();
+
+        journal.save_mutes(&[id("{c}")]).unwrap();
+
+        assert_eq!(journal.load_mutes().unwrap(), vec![id("{c}")]);
+        assert!(!journal.mutes.with_extension("tmp").exists());
+        journal.save_mutes(&[]).unwrap();
     }
 
     #[test]

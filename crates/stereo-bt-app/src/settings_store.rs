@@ -35,12 +35,24 @@ impl FileSettingsStore {
 }
 
 impl SettingsStore for FileSettingsStore {
+    /// Loads the settings; a missing file means defaults. An unreadable file
+    /// is kept as `settings.toml.corrupt` first, because the caller falls back
+    /// to defaults and the next save would overwrite it.
     fn load(&self) -> io::Result<Settings> {
-        match fs::read_to_string(&self.path) {
-            Ok(text) => toml::from_str(&text).map_err(io::Error::other),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Settings::default()),
-            Err(error) => Err(error),
+        let parsed = match fs::read(&self.path) {
+            Ok(bytes) => String::from_utf8(bytes)
+                .map_err(io::Error::other)
+                .and_then(|text| toml::from_str(&text).map_err(io::Error::other)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(Settings::default());
+            }
+            Err(error) => return Err(error),
+        };
+        if parsed.is_err() {
+            // Best effort: failing to keep a copy must not hide the real error.
+            let _ = fs::copy(&self.path, self.path.with_extension("toml.corrupt"));
         }
+        parsed
     }
 
     fn save(&self, settings: &Settings) -> io::Result<()> {
@@ -92,5 +104,8 @@ mod tests {
         fs::write(&store.path, "devices = 12").unwrap();
 
         assert!(store.load().is_err());
+        let kept = store.path.with_extension("toml.corrupt");
+        assert_eq!(fs::read_to_string(&kept).unwrap(), "devices = 12");
+        fs::remove_file(kept).unwrap();
     }
 }

@@ -29,7 +29,7 @@ and do not compensate for the different latency of each Bluetooth device.
 | F4 | Per-device volume | 0–100 %, independent of the Windows master volume. |
 | F5 | One-click play/stop | "Play on multiple devices" / "Stop playing" button; also from the tray. |
 | F6 | Hot-plug | Device removal does not stop others; reconnect resumes automatically. |
-| F7 | Tray mode | Keeps streaming when the window is closed; tray menu for start/stop/quit. |
+| F7 | Tray mode | Keeps playing when the window is closed (setting, on by default); tray menu: Show, Play on multiple devices / Stop playing, Quit. |
 | F8 | Profiles | Remember device set, channel mode, delay and volume per device ID. |
 | F9 | Clock-drift correction | Equal per-output queue cushion plus click-free adaptive resampling (±0.2 %, inaudible) that keeps every queue at the cushion; trimming only as a safety net. |
 | F10 | Follow system volume | All selected devices follow the Windows volume and mute of the default device (on by default); their own Windows volume is set to 100 % while streaming (restored afterwards); per-device Vol stays as a relative trim. |
@@ -78,7 +78,7 @@ WASAPI loopback (default render endpoint, 48 kHz f32 stereo)
 - **Real-time rule:** render threads do no heap allocation, no locks, no I/O, no logging.
   MMCSS "Pro Audio" thread priority.
 - **Default device:** always the loopback source. Setting **"Keep default device playing"**
-  (default **on**, the default device's checkbox): on = default device keeps playing
+  (default **on**, the default device's "Keep playing" switch): on = default device keeps playing
   undelayed and the other devices are delayed relative to it; off = default device is muted
   while streaming and only the selected devices play.
   Off (mute) is the better sync mode: every audible device is rendered by us, so any device can be
