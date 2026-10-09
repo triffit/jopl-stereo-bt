@@ -15,6 +15,9 @@ use crate::state_cell::StateCell;
 use crate::tuning::{CUSHION_FRAMES, MAX_EXCESS_FRAMES, QUEUE_FRAMES, WAIT_TIMEOUT_MS};
 use crate::{OutputConfig, OutputStatus, StreamState};
 
+/// Most extra packets read after one wake-up of the capture thread.
+const MAX_DRAINED_PACKETS: usize = 16;
+
 /// A new output queue handed to the capture thread.
 type NewOutput = (Producer<Frame>, Arc<OutputControls>);
 
@@ -313,6 +316,19 @@ fn capture_thread<B: Backend>(
         }
         let frames = capture.read(WAIT_TIMEOUT_MS)?;
         fan_out.push(frames);
+        // Drain packets that arrived together, so capture never falls behind
+        // (a microphone was measured delivering several per wake-up). Bounded,
+        // so a source that always has data cannot starve the stop check.
+        for _ in 0..MAX_DRAINED_PACKETS {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            let more = capture.read(0)?;
+            if more.is_empty() {
+                break;
+            }
+            fan_out.push(more);
+        }
     }
     Ok(())
 }
