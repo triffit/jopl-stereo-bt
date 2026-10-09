@@ -68,6 +68,18 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - "Make default" on a card → `Engine::make_default` → `Supervisor::make_default`
   (`IPolicyConfig::SetDefaultEndpoint` for console + multimedia roles), then reconcile.
 
+## Assisted sync (F12)
+
+- `ClickTrack` (engine) renders `ClickGenerator` clicks (core, 5 ms 2 kHz Hann burst, 1 s period)
+  into the **source** device; loopback carries them to every output through its real
+  pipeline. Emission time = write time + already-queued frames + offset in block.
+- `Supervisor::isolate(Some(id))` silences all other outputs (`OutputControls` silenced flag);
+  isolating a non-source device also mutes the source (journaled like any mute).
+- App `assistant.rs` (pure state machine): steps = source first, then playing outputs; taps
+  per step → `TapAnalysis` (median lag, MAD stray rejection, ≥5 taps) → `suggest_delay`
+  (reference − device + current delay; flag when < 0: make the slowest device the default).
+  Then fine-tune phase: all devices click, user adjusts delays by ear.
+
 ## Sync model
 
 - Every output keeps its queue at the same cushion (40 ms, `tuning.rs`); priming aligns to

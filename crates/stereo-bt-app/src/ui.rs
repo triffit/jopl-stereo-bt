@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use stereo_bt_core::{ChannelMode, DeviceId};
 
-use crate::controller::{Controller, EngineControl, View};
+use crate::assistant::Phase;
+use crate::controller::{AssistantView, Controller, EngineControl, View};
 use crate::settings_store::SettingsStore;
 use crate::view_model::{BadgeKind, DeviceRow, StatusKind};
 
@@ -60,6 +61,12 @@ where
             }
         }
     });
+    window.on_assistant_start(bind.action(|c| c.start_assistant(Instant::now())));
+    window.on_assistant_tap(bind.action(|c| c.assistant_tap(Instant::now())));
+    window.on_assistant_next(bind.action(Controller::assistant_next));
+    window.on_assistant_restart(bind.action(Controller::assistant_restart_step));
+    window.on_assistant_apply(bind.action(Controller::assistant_apply));
+    window.on_assistant_close(bind.action(Controller::assistant_close));
     window.on_follow_system_volume_changed({
         let bind = bind.clone();
         move |follow| {
@@ -225,6 +232,7 @@ fn apply_view(window: &MainWindow, rows: &VecModel<generated::DeviceRow>, view: 
     window.set_running(view.running);
     window.set_status_line(view.status_line.as_str().into());
     window.set_follow_system_volume(view.follow_system_volume);
+    apply_assistant(window, view.assistant.as_ref());
     window.set_system_volume_text(
         view.system_volume_percent
             .map(|percent| format!("{percent} %"))
@@ -249,6 +257,42 @@ fn apply_view(window: &MainWindow, rows: &VecModel<generated::DeviceRow>, view: 
     } else {
         rows.set_vec(new_rows);
     }
+}
+
+fn apply_assistant(window: &MainWindow, assistant: Option<&AssistantView>) {
+    let Some(a) = assistant else {
+        window.set_assistant(generated::AssistantState::default());
+        return;
+    };
+    window.set_assistant(generated::AssistantState {
+        active: true,
+        phase: match a.phase {
+            Phase::Measuring => 0,
+            Phase::Results => 1,
+            Phase::FineTune => 2,
+        },
+        step: to_i32(a.step),
+        steps: to_i32(a.steps),
+        device: a.device.as_str().into(),
+        is_source: a.is_source,
+        taps: to_i32(a.taps),
+        taps_wanted: to_i32(a.taps_wanted),
+        can_next: a.can_next,
+    });
+    let results: Vec<generated::AssistantResult> = a
+        .results
+        .iter()
+        .map(|r| generated::AssistantResult {
+            name: r.name.as_str().into(),
+            text: r.text.as_str().into(),
+            warning: r.warning,
+        })
+        .collect();
+    window.set_assistant_results(ModelRc::new(VecModel::from(results)));
+}
+
+fn to_i32(value: usize) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 fn to_ui_row(row: &DeviceRow) -> generated::DeviceRow {

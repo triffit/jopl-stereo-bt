@@ -144,6 +144,24 @@ impl Engine {
         self.request(|reply| Command::MakeDefault(id, reply))
     }
 
+    /// Starts or stops the assisted-sync click track on the default device.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] when the click track cannot be started.
+    pub fn set_click_track(&self, on: bool) -> Result<(), EngineError> {
+        self.request(|reply| Command::ClickTrack(on, reply))
+    }
+
+    /// Leaves only `device` audible for assisted sync (`None`: all again).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] when devices cannot be controlled.
+    pub fn isolate(&self, device: Option<DeviceId>) -> Result<(), EngineError> {
+        self.request(|reply| Command::Isolate(device, reply))
+    }
+
     /// The latest status snapshot (refreshed about every 100 ms).
     #[must_use]
     pub fn status(&self) -> EngineStatus {

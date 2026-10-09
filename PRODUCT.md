@@ -35,10 +35,10 @@ and do not compensate for the different latency of each Bluetooth device.
 | F9 | Clock-drift correction | Equal per-output queue cushion plus click-free adaptive resampling (±0.2 %, inaudible) that keeps every queue at the cushion; trimming only as a safety net. WaveSync has neither. |
 | F10 | Follow system volume | All selected devices follow the Windows volume and mute of the default device (on by default); per-device Vol stays as a relative trim. |
 | F11 | Make default | Switch the Windows default output device from a device card. |
+| F12 | Assisted sync | Click track played into the default device (so it reaches every device through its real path); tap along per isolated device, get suggested delays, then fine-tune by ear with all devices clicking. |
 
 ## Later (v2+)
 
-- Assisted sync: play a click track, user taps when heard, delay is suggested.
 - Automatic latency measurement via microphone.
 - Per-app capture (process loopback, Windows 10 2004+) instead of whole-system audio.
 - Auto-start with Windows.

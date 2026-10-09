@@ -28,6 +28,14 @@ pub(crate) struct SilentBackend {
     world: SharedWorld,
 }
 
+impl SilentBackend {
+    pub(crate) fn new(world: &SharedWorld) -> Self {
+        Self {
+            world: Arc::clone(world),
+        }
+    }
+}
+
 pub(crate) struct SilentCapture {
     block: [Frame; 480],
     world: SharedWorld,

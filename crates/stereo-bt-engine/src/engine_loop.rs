@@ -19,6 +19,8 @@ pub(crate) enum Command {
     Update(EngineConfig, Sender<Result<(), SupervisorError>>),
     Stop(Sender<Result<(), SupervisorError>>),
     MakeDefault(DeviceId, Sender<Result<(), SupervisorError>>),
+    ClickTrack(bool, Sender<Result<(), SupervisorError>>),
+    Isolate(Option<DeviceId>, Sender<Result<(), SupervisorError>>),
     Shutdown,
 }
 
@@ -52,6 +54,12 @@ pub(crate) fn run<P: Platform, J: MuteJournal>(
             }
             Ok(Command::MakeDefault(id, reply)) => {
                 let _ = reply.send(supervisor.make_default(&id));
+            }
+            Ok(Command::ClickTrack(on, reply)) => {
+                let _ = reply.send(supervisor.set_click_track(on));
+            }
+            Ok(Command::Isolate(device, reply)) => {
+                let _ = reply.send(supervisor.isolate(device));
             }
             Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {}

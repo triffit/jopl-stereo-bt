@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod channel_mode;
+mod click;
 mod delay;
 mod delay_line;
 mod device_event;
@@ -21,9 +22,11 @@ pub mod pcm;
 mod playout;
 mod sample_rate;
 mod system_volume;
+mod tap_analysis;
 mod volume;
 
 pub use channel_mode::ChannelMode;
+pub use click::ClickGenerator;
 pub use delay::Delay;
 pub use delay_line::DelayLine;
 pub use device_event::DeviceEvent;
@@ -37,4 +40,5 @@ pub use output_chain::OutputChain;
 pub use playout::{Playout, PlayoutPlan};
 pub use sample_rate::SampleRate;
 pub use system_volume::SystemVolume;
+pub use tap_analysis::{DelaySuggestion, TapAnalysis, suggest_delay};
 pub use volume::Volume;

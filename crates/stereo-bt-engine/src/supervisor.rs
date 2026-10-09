@@ -3,9 +3,13 @@ use std::time::{Duration, Instant};
 
 use stereo_bt_core::{DeviceId, DeviceInfo, SystemVolume};
 
+use crate::click_track::ClickTrack;
 use crate::{
     Backend, EngineConfig, MuteJournal, OutputConfig, OutputStatus, Platform, Session, StreamState,
 };
+
+/// Time between clicks of the assisted-sync click track.
+pub(crate) const CLICK_PERIOD_MILLIS: u32 = 1_000;
 
 /// How long a failed device or capture stream waits before it is retried.
 /// Bluetooth devices often need a moment after a dropout or profile switch.
@@ -43,6 +47,12 @@ pub struct EngineStatus {
     pub devices: Vec<DeviceInfo>,
     /// The followed Windows volume in percent, while following it.
     pub system_volume_percent: Option<u8>,
+    /// Whether the assisted-sync click track is playing.
+    pub click_track: bool,
+    /// When recent clicks left the default device, oldest first.
+    pub click_times: Vec<Instant>,
+    /// The only audible device while assisted sync isolates one.
+    pub isolated: Option<DeviceId>,
 }
 
 struct ActiveSession<B: Backend> {
@@ -84,6 +94,9 @@ pub struct Supervisor<P: Platform, J: MuteJournal> {
     session_starts: u64,
     devices: Vec<DeviceInfo>,
     system_volume: Option<SystemVolume>,
+    click_wanted: bool,
+    click_track: Option<ClickTrack>,
+    isolated: Option<DeviceId>,
 }
 
 impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
@@ -105,6 +118,9 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             session_starts: 0,
             devices: Vec::new(),
             system_volume: None,
+            click_wanted: false,
+            click_track: None,
+            isolated: None,
         };
         supervisor.reconcile()?;
         Ok(supervisor)
@@ -128,6 +144,30 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
     /// Returns [`SupervisorError`] when the journal cannot be written.
     pub fn stop(&mut self) -> Result<(), SupervisorError> {
         self.running = false;
+        self.click_wanted = false;
+        self.isolated = None;
+        self.reconcile()
+    }
+
+    /// Starts or stops the assisted-sync click track on the default device.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SupervisorError`] when the click thread cannot be started.
+    pub fn set_click_track(&mut self, on: bool) -> Result<(), SupervisorError> {
+        self.click_wanted = on;
+        self.reconcile_click_track()
+    }
+
+    /// Leaves only `device` audible for assisted sync (`None`: all again).
+    /// Isolating another device than the default also mutes the default
+    /// device for the duration (restored like any other mute).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SupervisorError`] when devices cannot be queried or controlled.
+    pub fn isolate(&mut self, device: Option<DeviceId>) -> Result<(), SupervisorError> {
+        self.isolated = device;
         self.reconcile()
     }
 
@@ -258,6 +298,13 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             session_starts: self.session_starts,
             devices: self.devices.clone(),
             system_volume_percent: self.system_volume.map(SystemVolume::percent),
+            click_track: self.click_track.is_some(),
+            click_times: self
+                .click_track
+                .as_ref()
+                .map(ClickTrack::clicks)
+                .unwrap_or_default(),
+            isolated: self.isolated.clone(),
         }
     }
 
@@ -274,13 +321,49 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             }
             _ => None,
         };
-        let mute_target = source.clone().filter(|_| !self.config.include_default);
+        let isolating_other = self
+            .isolated
+            .as_ref()
+            .is_some_and(|isolated| Some(isolated) != source.as_ref());
+        let mute_target = source
+            .clone()
+            .filter(|_| !self.config.include_default || isolating_other);
         self.restore_mutes_except(mute_target.as_ref())?;
         if let Some(id) = &mute_target {
             self.mute(id)?;
         }
         self.reconcile_session(source)?;
+        if let Some(active) = self.active.as_mut() {
+            active.session.isolate(self.isolated.as_ref());
+        }
+        self.reconcile_click_track()?;
         query.map(|_| ())
+    }
+
+    /// Keeps the click track playing on the current source while wanted.
+    fn reconcile_click_track(&mut self) -> Result<(), SupervisorError> {
+        let source = self
+            .active
+            .as_ref()
+            .filter(|_| self.click_wanted)
+            .map(|a| a.source.clone());
+        match source {
+            None => self.click_track = None,
+            Some(source) => {
+                if self.click_track.as_ref().map(ClickTrack::device) != Some(&source) {
+                    self.click_track = None;
+                    let track = ClickTrack::start(
+                        self.platform.backend(),
+                        source,
+                        self.platform.sample_rate(),
+                        CLICK_PERIOD_MILLIS,
+                    )
+                    .map_err(spawn_error)?;
+                    self.click_track = Some(track);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Unmutes every device we muted except `keep`. A device that cannot be
@@ -451,6 +534,72 @@ mod tests {
 
         assert!(s.make_default(&id("Z")).is_err());
         assert_eq!(lock(&w).default, Some(id("A")));
+    }
+
+    #[test]
+    fn click_track_plays_on_the_source_and_follows_it() {
+        let w = world("A", &["A", "B"]);
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["A", "B"], true)).unwrap();
+
+        s.set_click_track(true).unwrap();
+        assert!(s.status().click_track);
+        assert_eq!(
+            s.click_track.as_ref().map(ClickTrack::device),
+            Some(&id("A"))
+        );
+
+        s.make_default(&id("B")).unwrap();
+        assert_eq!(
+            s.click_track.as_ref().map(ClickTrack::device),
+            Some(&id("B"))
+        );
+
+        s.set_click_track(false).unwrap();
+        assert!(!s.status().click_track);
+    }
+
+    #[test]
+    fn isolating_another_device_mutes_the_source_until_released() {
+        let w = world("A", &["A", "B", "C"]);
+        let (mut s, journal) = supervisor(&w, &[]);
+        s.start(config(&["B", "C"], true)).unwrap();
+
+        s.isolate(Some(id("B"))).unwrap();
+        assert!(lock(&w).muted.contains(&id("A")));
+        assert_eq!(*lock(&journal), vec![id("A")]);
+        assert_eq!(s.status().isolated, Some(id("B")));
+
+        s.isolate(None).unwrap();
+        assert!(lock(&w).muted.is_empty());
+    }
+
+    #[test]
+    fn isolating_the_source_silences_the_outputs_but_keeps_it_playing() {
+        let w = world("A", &["A", "B"]);
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["B"], true)).unwrap();
+
+        s.isolate(Some(id("A"))).unwrap();
+
+        assert!(lock(&w).muted.is_empty());
+        let session = &s.active.as_ref().unwrap().session;
+        assert!(session.isolated_for_test(&id("B")));
+    }
+
+    #[test]
+    fn stop_ends_click_track_and_isolation() {
+        let w = world("A", &["A", "B"]);
+        let (mut s, _) = supervisor(&w, &[]);
+        s.start(config(&["B"], true)).unwrap();
+        s.set_click_track(true).unwrap();
+        s.isolate(Some(id("B"))).unwrap();
+
+        s.stop().unwrap();
+
+        assert!(!s.status().click_track);
+        assert_eq!(s.status().isolated, None);
+        assert!(lock(&w).muted.is_empty());
     }
 
     #[test]

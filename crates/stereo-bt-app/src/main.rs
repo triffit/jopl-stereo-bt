@@ -6,6 +6,7 @@
 // No console window in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod assistant;
 mod controller;
 // Used by build.rs to embed the exe icon; compiled here only for its tests.
 #[cfg(test)]

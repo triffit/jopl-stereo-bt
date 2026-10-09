@@ -267,19 +267,27 @@ export component Segmented inherits Rectangle {
 
 export component OutlineButton inherits Rectangle {
     in property <string> text;
+    in property <bool> enabled: true;
     callback clicked();
 
     height: 40px;
     min-width: 120px;
     border-radius: 8px;
-    background: touch.has-hover ? Theme.card-hover : Theme.card;
+    background: touch.has-hover && root.enabled ? Theme.card-hover : Theme.card;
     border-width: 1px;
     border-color: focus.has-focus ? Theme.accent-light : Theme.border;
+    opacity: root.enabled ? 1 : 0.45;
     accessible-role: button;
     accessible-label: root.text;
-    accessible-action-default => { root.clicked(); }
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if (root.enabled) {
+            root.clicked();
+        }
+    }
 
     focus := FocusScope {
+        enabled: root.enabled;
         key-pressed(event) => {
             if (event.text == " " || event.text == Key.Return) {
                 root.clicked();
@@ -288,6 +296,7 @@ export component OutlineButton inherits Rectangle {
             return reject;
         }
         touch := TouchArea {
+            enabled: root.enabled;
             mouse-cursor: pointer;
             clicked => {
                 focus.focus();

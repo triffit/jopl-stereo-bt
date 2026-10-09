@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use stereo_bt_core::{ChannelMode, Delay, DeviceId, Volume};
 use stereo_bt_engine::{Engine, EngineConfig, EngineStatus};
 
+use crate::assistant::{Assistant, Phase, Step, TAPS_WANTED};
 use crate::settings::{DeviceSettings, Settings};
 use crate::settings_store::SettingsStore;
 use crate::view_model::{self, DeviceRow, StatusKind};
@@ -21,6 +22,8 @@ pub(crate) trait EngineControl {
     fn update(&self, config: EngineConfig) -> Result<(), String>;
     fn stop(&self) -> Result<(), String>;
     fn make_default(&self, id: &DeviceId) -> Result<(), String>;
+    fn set_click_track(&self, on: bool) -> Result<(), String>;
+    fn isolate(&self, device: Option<DeviceId>) -> Result<(), String>;
     fn status(&self) -> EngineStatus;
     fn last_error(&self) -> Option<String>;
 }
@@ -42,6 +45,14 @@ impl EngineControl for Engine {
         Engine::make_default(self, id.clone()).map_err(|e| e.to_string())
     }
 
+    fn set_click_track(&self, on: bool) -> Result<(), String> {
+        Engine::set_click_track(self, on).map_err(|e| e.to_string())
+    }
+
+    fn isolate(&self, device: Option<DeviceId>) -> Result<(), String> {
+        Engine::isolate(self, device).map_err(|e| e.to_string())
+    }
+
     fn status(&self) -> EngineStatus {
         Engine::status(self)
     }
@@ -49,6 +60,29 @@ impl EngineControl for Engine {
     fn last_error(&self) -> Option<String> {
         Engine::last_error(self)
     }
+}
+
+/// One line of the assistant's results.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResultLine {
+    pub(crate) name: String,
+    pub(crate) text: String,
+    pub(crate) warning: bool,
+}
+
+/// What the sync assistant shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AssistantView {
+    pub(crate) phase: Phase,
+    /// 1-based step and number of steps, while measuring.
+    pub(crate) step: usize,
+    pub(crate) steps: usize,
+    pub(crate) device: String,
+    pub(crate) is_source: bool,
+    pub(crate) taps: usize,
+    pub(crate) taps_wanted: usize,
+    pub(crate) can_next: bool,
+    pub(crate) results: Vec<ResultLine>,
 }
 
 /// Everything the window displays.
@@ -63,6 +97,7 @@ pub(crate) struct View {
     pub(crate) status_line: String,
     pub(crate) status_kind: StatusKind,
     pub(crate) error: Option<String>,
+    pub(crate) assistant: Option<AssistantView>,
 }
 
 pub(crate) struct Controller<E: EngineControl, S: SettingsStore> {
@@ -74,6 +109,7 @@ pub(crate) struct Controller<E: EngineControl, S: SettingsStore> {
     error: Option<String>,
     engine_dirty: bool,
     unsaved_since: Option<Instant>,
+    assistant: Option<Assistant>,
 }
 
 impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
@@ -96,6 +132,7 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
             error,
             engine_dirty: false,
             unsaved_since: None,
+            assistant: None,
         };
         if controller.settings.learn(&controller.status.devices) {
             controller.unsaved_since = Some(Instant::now());
@@ -105,6 +142,9 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
 
     /// Start/Stop button (F5).
     pub(crate) fn toggle_running(&mut self) {
+        if self.running {
+            self.assistant_close();
+        }
         let result = if self.running {
             self.engine.stop()
         } else {
@@ -217,6 +257,165 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
             status_line: view_model::status_line(&self.settings, &self.status),
             status_kind: view_model::status_kind(&self.status),
             error: self.error.clone().or_else(|| self.engine.last_error()),
+            assistant: self.assistant.as_ref().map(|a| self.assistant_view(a)),
+        }
+    }
+
+    /// Opens the sync assistant: clicks start on the default device, which
+    /// is measured first, alone.
+    pub(crate) fn start_assistant(&mut self, now: Instant) {
+        if !self.running {
+            self.error = Some("Start streaming first, then run the sync assistant.".into());
+            return;
+        }
+        let steps = self.assistant_steps();
+        if steps.len() < 2 {
+            self.error = Some(
+                "The sync assistant needs at least one playing device besides the default.".into(),
+            );
+            return;
+        }
+        let first = steps[0].id.clone();
+        let result = self
+            .engine
+            .set_click_track(true)
+            .and_then(|()| self.engine.isolate(Some(first)));
+        match result {
+            Ok(()) => {
+                self.error = None;
+                self.assistant = Some(Assistant::new(steps, now));
+            }
+            Err(e) => {
+                self.error = Some(format!("The sync assistant could not start: {e}"));
+                self.assistant_close();
+            }
+        }
+    }
+
+    /// The user heard a click.
+    pub(crate) fn assistant_tap(&mut self, now: Instant) {
+        if let Some(assistant) = self.assistant.as_mut() {
+            assistant.tap(now);
+        }
+    }
+
+    pub(crate) fn assistant_restart_step(&mut self) {
+        if let Some(assistant) = self.assistant.as_mut() {
+            assistant.restart_step();
+        }
+    }
+
+    /// Finishes the current device and isolates the next one (or all again
+    /// when every device is measured).
+    pub(crate) fn assistant_next(&mut self) {
+        let clicks = self.engine.status().click_times;
+        let Some(assistant) = self.assistant.as_mut() else {
+            return;
+        };
+        let next = assistant.advance(&clicks).map(|step| step.id.clone());
+        if let Err(e) = self.engine.isolate(next) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Uses the suggested delays, then lets all devices click together for
+    /// fine-tuning by ear.
+    pub(crate) fn assistant_apply(&mut self) {
+        let Some(assistant) = self.assistant.as_ref() else {
+            return;
+        };
+        let settings = &self.settings;
+        let suggestions = assistant.suggestions(|id| {
+            settings
+                .device(id)
+                .map_or(stereo_bt_core::Delay::ZERO, |d| d.delay)
+        });
+        for line in suggestions {
+            if let Some(suggestion) = line.suggestion {
+                self.edit(&line.id, |d| d.delay = suggestion.delay);
+            }
+        }
+        if let Some(assistant) = self.assistant.as_mut() {
+            assistant.start_fine_tune();
+        }
+    }
+
+    /// Closes the assistant: clicks stop and every device plays again.
+    pub(crate) fn assistant_close(&mut self) {
+        if self.assistant.take().is_none() {
+            return;
+        }
+        let result = self
+            .engine
+            .set_click_track(false)
+            .and(self.engine.isolate(None));
+        if let Err(e) = result {
+            self.error = Some(e);
+        }
+    }
+
+    /// The default device first (the reference), then every playing device.
+    fn assistant_steps(&self) -> Vec<Step> {
+        let name = |id: &DeviceId| {
+            self.settings
+                .device(id)
+                .map_or_else(|| id.to_string(), |d| d.name.clone())
+        };
+        let source = self.status.source.iter().map(|id| Step {
+            id: id.clone(),
+            name: name(id),
+            is_source: true,
+        });
+        let outputs = self
+            .status
+            .outputs
+            .iter()
+            .filter(|o| o.state == stereo_bt_engine::StreamState::Running)
+            .map(|o| Step {
+                id: o.id.clone(),
+                name: name(&o.id),
+                is_source: false,
+            });
+        source.chain(outputs).collect()
+    }
+
+    fn assistant_view(&self, assistant: &Assistant) -> AssistantView {
+        let (step, steps) = assistant.progress();
+        let current = assistant.current_step();
+        let results = assistant
+            .suggestions(|id| {
+                self.settings
+                    .device(id)
+                    .map_or(stereo_bt_core::Delay::ZERO, |d| d.delay)
+            })
+            .into_iter()
+            .map(|line| {
+                let (text, warning) = match line.suggestion {
+                    Some(s) if s.too_late => (
+                        "Plays later than the default device. Make the slowest device the default."
+                            .to_owned(),
+                        true,
+                    ),
+                    Some(s) => (format!("Delay {} ms", s.delay.as_millis()), false),
+                    None => ("Not measured; tap along with the clicks.".to_owned(), true),
+                };
+                ResultLine {
+                    name: line.name,
+                    text,
+                    warning,
+                }
+            })
+            .collect();
+        AssistantView {
+            phase: assistant.phase(),
+            step,
+            steps,
+            device: current.map(|s| s.name.clone()).unwrap_or_default(),
+            is_source: current.is_some_and(|s| s.is_source),
+            taps: assistant.taps(),
+            taps_wanted: TAPS_WANTED,
+            can_next: assistant.can_advance(),
+            results,
         }
     }
 
@@ -249,6 +448,8 @@ mod tests {
         updated: Vec<EngineConfig>,
         stopped: usize,
         made_default: Vec<DeviceId>,
+        click_track: bool,
+        isolated: Vec<Option<DeviceId>>,
         fail: bool,
         status: EngineStatus,
     }
@@ -282,6 +483,16 @@ mod tests {
                 return Err("refused".into());
             }
             log.made_default.push(id.clone());
+            Ok(())
+        }
+
+        fn set_click_track(&self, on: bool) -> Result<(), String> {
+            self.0.borrow_mut().click_track = on;
+            Ok(())
+        }
+
+        fn isolate(&self, device: Option<DeviceId>) -> Result<(), String> {
+            self.0.borrow_mut().isolated.push(device);
             Ok(())
         }
 
@@ -435,6 +646,109 @@ mod tests {
         c.make_default(&id("B"));
 
         assert!(c.view().error.unwrap().contains("refused"));
+    }
+
+    /// Streaming from A to B, with clicks every second from `epoch`.
+    fn streaming(epoch: Instant) -> (Controller<FakeEngine, FakeStore>, FakeEngine) {
+        let (mut c, engine, _) = controller();
+        c.set_enabled(&id("B"), true);
+        c.toggle_running();
+        {
+            let mut log = engine.0.borrow_mut();
+            log.status.source = Some(id("A"));
+            log.status.outputs = vec![stereo_bt_engine::OutputStatus {
+                id: id("B"),
+                state: stereo_bt_engine::StreamState::Running,
+                underruns: 0,
+                overruns: 0,
+                trims: 0,
+                error: None,
+            }];
+            log.status.click_times = (0..60).map(|n| epoch + Duration::from_secs(n)).collect();
+        }
+        c.tick(epoch);
+        (c, engine)
+    }
+
+    fn tap_along(c: &mut Controller<FakeEngine, FakeStore>, epoch: Instant, from: u64, lag: u64) {
+        for n in from..from + 8 {
+            c.assistant_tap(epoch + Duration::from_millis(n * 1_000 + lag));
+        }
+    }
+
+    #[test]
+    fn sync_assistant_needs_streaming() {
+        let (mut c, engine, _) = controller();
+
+        c.start_assistant(Instant::now());
+
+        assert!(c.view().assistant.is_none());
+        assert!(c.view().error.unwrap().contains("Start streaming"));
+        assert!(!engine.0.borrow().click_track);
+    }
+
+    #[test]
+    fn sync_assistant_measures_the_default_device_first_alone() {
+        let epoch = Instant::now();
+        let (mut c, engine) = streaming(epoch);
+
+        c.start_assistant(epoch);
+
+        let view = c.view().assistant.unwrap();
+        assert_eq!(view.phase, Phase::Measuring);
+        assert_eq!((view.step, view.steps), (1, 2));
+        assert!(view.is_source);
+        let log = engine.0.borrow();
+        assert!(log.click_track);
+        assert_eq!(log.isolated.last(), Some(&Some(id("A"))));
+    }
+
+    #[test]
+    fn sync_assistant_suggests_and_applies_delays_then_fine_tunes() {
+        let epoch = Instant::now();
+        let (mut c, engine) = streaming(epoch);
+        c.start_assistant(epoch);
+        tap_along(&mut c, epoch, 1, 260);
+        c.assistant_next();
+        assert_eq!(engine.0.borrow().isolated.last(), Some(&Some(id("B"))));
+        tap_along(&mut c, epoch, 10, 90);
+        c.assistant_next();
+
+        let view = c.view().assistant.unwrap();
+        assert_eq!(view.phase, Phase::Results);
+        assert_eq!(view.results[0].text, "Delay 170 ms");
+        assert_eq!(engine.0.borrow().isolated.last(), Some(&None));
+
+        c.assistant_apply();
+
+        assert_eq!(c.view().assistant.unwrap().phase, Phase::FineTune);
+        assert_eq!(c.view().rows[1].delay_ms, 170);
+    }
+
+    #[test]
+    fn closing_the_assistant_stops_clicks_and_isolation() {
+        let epoch = Instant::now();
+        let (mut c, engine) = streaming(epoch);
+        c.start_assistant(epoch);
+
+        c.assistant_close();
+
+        assert!(c.view().assistant.is_none());
+        let log = engine.0.borrow();
+        assert!(!log.click_track);
+        assert_eq!(log.isolated.last(), Some(&None));
+    }
+
+    #[test]
+    fn stopping_closes_the_assistant() {
+        let epoch = Instant::now();
+        let (mut c, engine) = streaming(epoch);
+        c.start_assistant(epoch);
+
+        c.toggle_running();
+
+        assert!(c.view().assistant.is_none());
+        assert!(!engine.0.borrow().click_track);
     }
 
     #[test]

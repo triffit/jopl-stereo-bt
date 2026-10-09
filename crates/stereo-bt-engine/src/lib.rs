@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+mod click_track;
 mod engine;
 mod engine_config;
 mod engine_loop;

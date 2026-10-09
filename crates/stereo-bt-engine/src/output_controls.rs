@@ -21,6 +21,8 @@ pub(crate) struct OutputControls {
     stop: AtomicBool,
     /// Shared gain (e.g. the system volume) as `f32` bits.
     master_gain: AtomicU32,
+    /// Silenced while another device is isolated for assisted sync.
+    silenced: AtomicBool,
     /// Set once, when the render thread fails; never touched on the audio path.
     error: Mutex<Option<String>>,
 }
@@ -37,6 +39,7 @@ impl OutputControls {
             overruns: AtomicU64::new(0),
             stop: AtomicBool::new(false),
             master_gain: AtomicU32::new(1.0_f32.to_bits()),
+            silenced: AtomicBool::new(false),
             error: Mutex::new(None),
         }
     }
@@ -85,8 +88,17 @@ impl OutputControls {
         self.overruns.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// The shared gain, or 0 while this output is silenced.
     pub(crate) fn master_gain(&self) -> f32 {
-        f32::from_bits(self.master_gain.load(Ordering::Relaxed))
+        if self.silenced.load(Ordering::Relaxed) {
+            0.0
+        } else {
+            f32::from_bits(self.master_gain.load(Ordering::Relaxed))
+        }
+    }
+
+    pub(crate) fn set_silenced(&self, silenced: bool) {
+        self.silenced.store(silenced, Ordering::Relaxed);
     }
 
     pub(crate) fn set_master_gain(&self, amplitude: f32) {

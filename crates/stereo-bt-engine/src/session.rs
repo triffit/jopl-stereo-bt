@@ -43,6 +43,8 @@ pub struct Session<B: Backend> {
     new_outputs: Sender<NewOutput>,
     outputs: Vec<OutputHandle>,
     master_gain: f32,
+    /// The only output left audible, while isolating one for assisted sync.
+    isolated: Option<DeviceId>,
 }
 
 impl<B: Backend> Session<B> {
@@ -86,6 +88,7 @@ impl<B: Backend> Session<B> {
             new_outputs,
             outputs: Vec::with_capacity(configs.len()),
             master_gain: 1.0,
+            isolated: None,
         };
         for config in configs {
             session.add_output(config)?;
@@ -102,6 +105,7 @@ impl<B: Backend> Session<B> {
         self.remove_output(&config.id);
         let controls = Arc::new(OutputControls::new(config));
         controls.set_master_gain(self.master_gain);
+        controls.set_silenced(self.is_silenced(&config.id));
         let (producer, consumer) = RingBuffer::new(QUEUE_FRAMES);
 
         let backend = Arc::clone(&self.backend);
@@ -161,6 +165,27 @@ impl<B: Backend> Session<B> {
         for output in &self.outputs {
             output.controls.set_master_gain(self.master_gain);
         }
+    }
+
+    /// Leaves only `device` audible (`None`: all outputs audible again).
+    /// Isolating a device outside the session silences every output.
+    pub fn isolate(&mut self, device: Option<&DeviceId>) {
+        self.isolated = device.cloned();
+        for output in &self.outputs {
+            output.controls.set_silenced(self.is_silenced(&output.id));
+        }
+    }
+
+    /// Whether `id` is currently silenced by isolation (test helper).
+    #[cfg(test)]
+    pub(crate) fn isolated_for_test(&self, id: &DeviceId) -> bool {
+        self.is_silenced(id)
+    }
+
+    fn is_silenced(&self, id: &DeviceId) -> bool {
+        self.isolated
+            .as_ref()
+            .is_some_and(|isolated| isolated != id)
     }
 
     /// The gain shared by all outputs.

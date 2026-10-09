@@ -22,6 +22,151 @@ export struct DeviceRow {
     volume: float,
 }
 
+// What the sync assistant shows; phase 0 measuring, 1 results, 2 fine-tune.
+export struct AssistantState {
+    active: bool,
+    phase: int,
+    step: int,
+    steps: int,
+    device: string,
+    is-source: bool,
+    taps: int,
+    taps-wanted: int,
+    can-next: bool,
+}
+
+export struct AssistantResult {
+    name: string,
+    text: string,
+    warning: bool,
+}
+
+// Measuring and results steps of the sync assistant.
+component AssistantPanel inherits Rectangle {
+    in property <AssistantState> state;
+    in property <[AssistantResult]> results;
+    callback tap();
+    callback next();
+    callback restart();
+    callback apply();
+    callback cancel();
+
+    border-radius: Theme.radius;
+    background: Theme.card;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    // Space taps while measuring, wherever focus is inside the panel.
+    keys := FocusScope {
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if (root.state.phase == 0 && event.text == " ") {
+                root.tap();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            padding: 24px;
+            spacing: 14px;
+
+            if root.state.phase == 0: VerticalLayout {
+                spacing: 14px;
+                Text {
+                    text: "Step " + root.state.step + " of " + root.state.steps + " · Listen to " + root.state.device;
+                    color: Theme.text;
+                    font-size: 18px;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: (root.state.is-source
+                        ? "Only the default device plays the clicks now; it is the reference the others are aligned to."
+                        : "Only this device plays the clicks now.")
+                        + " Press Space or Tap each time you hear a click. Pause other audio for best results.";
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+                GradientButton {
+                    height: 110px;
+                    text: "Tap";
+                    clicked => { root.tap(); }
+                }
+                Text {
+                    text: "Taps: " + root.state.taps + " / " + root.state.taps-wanted;
+                    color: root.state.taps >= root.state.taps-wanted ? Theme.good : Theme.accent-light;
+                    font-size: 15px;
+                    horizontal-alignment: center;
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+                    OutlineButton {
+                        text: "Start over";
+                        clicked => { root.restart(); }
+                    }
+                    OutlineButton {
+                        text: root.state.step < root.state.steps ? "Next device" : "Show results";
+                        enabled: root.state.can-next;
+                        clicked => { root.next(); }
+                    }
+                    OutlineButton {
+                        text: "Cancel";
+                        clicked => { root.cancel(); }
+                    }
+                }
+            }
+
+            if root.state.phase == 1: VerticalLayout {
+                spacing: 12px;
+                Text {
+                    text: "Suggested delays";
+                    color: Theme.text;
+                    font-size: 18px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: "Measured against the default device. After applying, all devices click together so you can fine-tune by ear.";
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+                for result in root.results: HorizontalLayout {
+                    spacing: 12px;
+                    Text {
+                        text: result.name;
+                        color: Theme.text;
+                        font-weight: 600;
+                        min-width: 220px;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: result.text;
+                        color: result.warning ? Theme.warning : Theme.accent-light;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+                    OutlineButton {
+                        text: "Apply and fine-tune";
+                        clicked => { root.apply(); }
+                    }
+                    OutlineButton {
+                        text: "Cancel";
+                        clicked => { root.cancel(); }
+                    }
+                }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+            }
+        }
+    }
+}
+
 // Volume, delay and channel controls of one target device.
 component DeviceControls inherits GridLayout {
     in property <DeviceRow> device;
@@ -188,11 +333,19 @@ export component MainWindow inherits Window {
     in property <string> error-text;
     in property <string> version;
     in property <bool> follow-system-volume;
+    in property <AssistantState> assistant;
+    in property <[AssistantResult]> assistant-results;
     // Current Windows volume, e.g. "45 %"; empty when not following.
     in property <string> system-volume-text;
 
     callback toggle-running();
     callback follow-system-volume-changed(bool);
+    callback assistant-start();
+    callback assistant-tap();
+    callback assistant-next();
+    callback assistant-restart();
+    callback assistant-apply();
+    callback assistant-close();
     callback checked-changed(string, bool);
     callback make-default(string);
     callback mode-changed(string, int);
@@ -263,9 +416,17 @@ export component MainWindow inherits Window {
             }
             VerticalLayout {
                 alignment: center;
-                OutlineButton {
-                    text: "About";
-                    clicked => { about-popup.show(); }
+                HorizontalLayout {
+                    spacing: 10px;
+                    OutlineButton {
+                        text: "Sync assistant";
+                        enabled: root.running && !root.assistant.active;
+                        clicked => { root.assistant-start(); }
+                    }
+                    OutlineButton {
+                        text: "About";
+                        clicked => { about-popup.show(); }
+                    }
                 }
             }
         }
@@ -319,7 +480,43 @@ export component MainWindow inherits Window {
             }
         }
 
-        ScrollView {
+        if root.assistant.active && root.assistant.phase == 2: Rectangle {
+            border-radius: Theme.radius;
+            background: Theme.accent.with-alpha(0.14);
+            border-width: 1px;
+            border-color: Theme.accent;
+            HorizontalLayout {
+                padding: 14px;
+                spacing: 14px;
+                Text {
+                    text: "Fine-tune: every device clicks together now. Adjust each Delay until the clicks sound like one. A device that is still late at 0 ms: make the slowest device the default.";
+                    color: Theme.text;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    OutlineButton {
+                        text: "Done";
+                        clicked => { root.assistant-close(); }
+                    }
+                }
+            }
+        }
+
+        if root.assistant.active && root.assistant.phase != 2: AssistantPanel {
+            vertical-stretch: 1;
+            state: root.assistant;
+            results: root.assistant-results;
+            tap => { root.assistant-tap(); }
+            next => { root.assistant-next(); }
+            restart => { root.assistant-restart(); }
+            apply => { root.assistant-apply(); }
+            cancel => { root.assistant-close(); }
+        }
+
+        if !root.assistant.active || root.assistant.phase == 2: ScrollView {
             vertical-stretch: 1;
             VerticalLayout {
                 spacing: 12px;
