@@ -93,9 +93,6 @@ where
     window.on_virtual_bass_changed(
         bind.device(|c, id, percent: f32| c.set_virtual_bass(id, round(percent))),
     );
-    window.on_max_volume_changed(
-        bind.device(|c, id, percent: f32| c.set_max_volume(id, round(percent))),
-    );
 
     // Without a tray (e.g. no taskbar) the app cannot be reached when hidden,
     // so closing the window then always quits.
@@ -514,7 +511,6 @@ fn to_ui_row(row: &DeviceRow, heading: &str) -> generated::DeviceRow {
             f32::from(row.bass_cut_hz)
         },
         virtual_bass: f32::from(row.virtual_bass_percent),
-        max_volume: f32::from(row.max_volume_percent),
     }
 }
 

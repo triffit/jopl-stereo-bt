@@ -15,9 +15,6 @@ pub struct OutputConfig {
     pub bass_cut: BassCut,
     /// Harmonics that make cut bass audible again (F15).
     pub virtual_bass: VirtualBass,
-    /// The device's own Windows volume while following the system volume
-    /// (F15); below 100 % keeps a small speaker out of its distorting range.
-    pub max_volume: Volume,
     /// Where the speaker stands in a surround setup (F20).
     pub position: SpeakerPosition,
 }
@@ -34,7 +31,6 @@ impl OutputConfig {
             channel_mode: ChannelMode::Stereo,
             bass_cut: BassCut::OFF,
             virtual_bass: VirtualBass::OFF,
-            max_volume: Volume::FULL,
             position: SpeakerPosition::Front,
         }
     }

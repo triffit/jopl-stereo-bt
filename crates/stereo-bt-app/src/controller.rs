@@ -343,14 +343,6 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         self.edit(id, |d| d.virtual_bass = amount);
     }
 
-    /// Sets the device's own volume while following the system volume,
-    /// clamped to 0..=100 % (F15).
-    pub(crate) fn set_max_volume(&mut self, id: &DeviceId, percent: i64) {
-        let clamped = u8::try_from(percent.clamp(0, 100)).unwrap_or(100);
-        let volume = Volume::from_percent(clamped).unwrap_or(Volume::FULL);
-        self.edit(id, |d| d.max_volume = volume);
-    }
-
     /// Sets where a speaker stands in a surround setup (F20).
     pub(crate) fn set_position(&mut self, id: &DeviceId, position: SpeakerPosition) {
         self.edit(id, |d| d.position = position);
@@ -1337,14 +1329,12 @@ mod tests {
     }
 
     #[test]
-    fn f15_virtual_bass_and_max_volume_are_clamped() {
+    fn f15_virtual_bass_is_clamped() {
         let (mut c, _, _) = controller();
 
         c.set_virtual_bass(&id("B"), 150);
-        c.set_max_volume(&id("B"), -5);
 
         assert_eq!(c.view().rows[1].virtual_bass_percent, 100);
-        assert_eq!(c.view().rows[1].max_volume_percent, 0);
     }
 
     #[test]

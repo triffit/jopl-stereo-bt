@@ -124,9 +124,6 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   ceiling exactly 1.0). None of them adds latency, so sound settings never affect sync.
 - Off is bit-exact pass-through, and the limiter leaves anything within full scale untouched:
   tests that use sample values as frame markers must keep them ≤ 1.0.
-- Speaker volume limit: `OutputConfig::max_volume` is the Windows volume
-  `Supervisor::reconcile_volumes` sets on a target while following (default 100 %), journaled
-  like before and updated live.
 
 ## Sync model
 
@@ -148,7 +145,7 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   `OutputChain::new`), ×1.4, right rear inverted. `SpeakerPosition` per device in
   `OutputConfig`/`DeviceSettings`, live via `OutputControls`.
 - Device cards collapse (`DeviceSettings::collapsed`, UI-only, no engine update) and then
-  show `DeviceRow::summary`. Card controls are a `GridLayout` so both rows share columns;
+  show `DeviceRow::summary`. All card controls sit in one row (titles carry the values, e.g. "Delay  41 ms");
   the page is a `Flickable` (`content-width` = its width: no sideways scrolling) with the
   custom Windows 11 style `PageScrollBar` (3 px, 6 px on hover, draggable).
 

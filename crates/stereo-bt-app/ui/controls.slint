@@ -375,7 +375,7 @@ export component Segmented inherits Rectangle {
             padding: 1px;
             for option[index] in root.options: Rectangle {
                 horizontal-stretch: 1;
-                min-width: 50px;
+                min-width: option-text.preferred-width + 16px;
                 background: index == root.current ? #ffffff17 : segment-touch.has-hover ? #ffffff0a : transparent;
                 accessible-role: tab;
                 accessible-label: option;
@@ -389,7 +389,7 @@ export component Segmented inherits Rectangle {
                     width: 1px;
                     background: Theme.control-stroke;
                 }
-                Text {
+                option-text := Text {
                     text: option;
                     color: Theme.text;
                     horizontal-alignment: center;

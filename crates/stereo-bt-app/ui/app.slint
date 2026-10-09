@@ -38,7 +38,6 @@ export struct DeviceRow {
     // Bass cut slider position: 30 means off.
     bass-cut: float,
     virtual-bass: float,
-    max-volume: float,
 }
 
 // One lane of the timing overview, in milliseconds.
@@ -128,7 +127,8 @@ component CardHeader inherits HorizontalLayout {
     @children
 }
 
-// A labelled slider with its value, e.g. "Delay  [----o--]  41 ms".
+// A slider with its title and value on one line above it, e.g.
+// "Delay        41 ms", so several fit side by side.
 component LabeledSlider inherits VerticalLayout {
     in property <string> title;
     in property <string> label;
@@ -141,43 +141,43 @@ component LabeledSlider inherits VerticalLayout {
 
     spacing: 0;
     horizontal-stretch: 1;
-    Description {
-        text: root.title;
-        color: Theme.text-2;
-    }
+    min-width: 96px;
     HorizontalLayout {
-        spacing: 12px;
-        Slider {
-            minimum: root.minimum;
-            maximum: root.maximum;
-            value <=> root.value;
-            enabled: root.enabled;
-            label: root.label;
-            changed(value) => { root.changed(value); }
+        spacing: 8px;
+        Description {
+            text: root.title;
+            color: Theme.text-2;
+            wrap: no-wrap;
+            overflow: elide;
+            horizontal-stretch: 1;
         }
-        Text {
+        Description {
             text: root.value-text;
             color: root.enabled ? Theme.text : Theme.text-3;
+            wrap: no-wrap;
             horizontal-alignment: right;
-            vertical-alignment: center;
-            min-width: 52px;
         }
+    }
+    Slider {
+        minimum: root.minimum;
+        maximum: root.maximum;
+        value <=> root.value;
+        enabled: root.enabled;
+        label: root.label;
+        changed(value) => { root.changed(value); }
     }
 }
 
-// Every setting of one playing device: channels, delay and volume, then
-// the sound row for small speakers (bass cut, virtual bass, speaker limit).
-component DeviceControls inherits VerticalLayout {
+// Every setting of one playing device in one row: channels, position,
+// delay, volume, bass cut and virtual bass.
+component DeviceControls inherits HorizontalLayout {
     in property <DeviceRow> device;
-    // The speaker volume limit only acts while following the system volume.
-    in property <bool> following;
     callback mode-changed(int);
     callback position-changed(int);
     callback delay-changed(float);
     callback volume-changed(float);
     callback bass-cut-changed(float);
     callback virtual-bass-changed(float);
-    callback max-volume-changed(float);
 
     // User interaction replaces a control's value binding, so push
     // external changes (e.g. applied measurements) in explicitly.
@@ -188,90 +188,71 @@ component DeviceControls inherits VerticalLayout {
         position-picker.current = device.position;
         bass-slider.value = device.bass-cut;
         virtual-bass-slider.value = device.virtual-bass;
-        max-volume-slider.value = device.max-volume;
     }
 
     padding-left: 56px;
     padding-right: 16px;
-    padding-top: 4px;
+    padding-top: 6px;
     padding-bottom: 10px;
-    spacing: 4px;
-    // A grid, so both rows share their columns.
-    GridLayout {
-        spacing-horizontal: 24px;
-        spacing-vertical: 6px;
-        Row {
-            VerticalLayout {
-                spacing: 6px;
-                Description {
-                    text: "Channels";
-                    color: Theme.text-2;
-                }
-                mode-picker := Segmented {
-                    options: ["Stereo", "Left", "Right", "Mono"];
-                    current: device.mode;
-                    label: "Channels for " + device.name;
-                    selected(mode) => { root.mode-changed(mode); }
-                }
-            }
-            VerticalLayout {
-                spacing: 6px;
-                Description {
-                    text: "Position";
-                    color: Theme.text-2;
-                }
-                position-picker := Segmented {
-                    options: ["Front", "Center", "Rear"];
-                    current: device.position;
-                    label: "Surround position of " + device.name;
-                    selected(position) => { root.position-changed(position); }
-                }
-            }
-            delay-slider := LabeledSlider {
-                title: "Delay";
-                label: "Delay in milliseconds for " + device.name;
-                minimum: 0;
-                maximum: 500;
-                value: device.delay;
-                value-text: round(self.value) + " ms";
-                changed(value) => { root.delay-changed(value); }
-            }
-            volume-slider := LabeledSlider {
-                title: "Volume";
-                label: "Volume for " + device.name;
-                value: device.volume;
-                value-text: round(self.value);
-                changed(value) => { root.volume-changed(value); }
-            }
+    spacing: 16px;
+    VerticalLayout {
+        spacing: 4px;
+        Description {
+            text: "Channels";
+            color: Theme.text-2;
         }
-        Row {
-            // The lowest slider position means off (below the 40 Hz minimum).
-            bass-slider := LabeledSlider {
-                title: "Bass cut";
-                label: "Bass cut in hertz for " + device.name + "; lowest position is off";
-                minimum: 30;
-                maximum: 300;
-                value: device.bass-cut;
-                value-text: self.value < 40 ? "Off" : round(self.value) + " Hz";
-                changed(value) => { root.bass-cut-changed(value); }
-            }
-            virtual-bass-slider := LabeledSlider {
-                title: "Virtual bass";
-                label: "Virtual bass in percent for " + device.name;
-                value: device.virtual-bass;
-                value-text: self.value < 1 ? "Off" : round(self.value) + " %";
-                changed(value) => { root.virtual-bass-changed(value); }
-            }
-            max-volume-slider := LabeledSlider {
-                colspan: 2;
-                title: root.following ? "Speaker volume limit" : "Speaker volume limit (with Follow system volume)";
-                label: "Speaker volume limit in percent for " + device.name + (root.following ? "" : "; only used while following the system volume");
-                enabled: root.following;
-                value: device.max-volume;
-                value-text: round(self.value) + " %";
-                changed(value) => { root.max-volume-changed(value); }
-            }
+        mode-picker := Segmented {
+            options: ["Stereo", "Left", "Right", "Mono"];
+            current: device.mode;
+            label: "Channels for " + device.name;
+            selected(mode) => { root.mode-changed(mode); }
         }
+    }
+    VerticalLayout {
+        spacing: 4px;
+        Description {
+            text: "Position";
+            color: Theme.text-2;
+        }
+        position-picker := Segmented {
+            options: ["Front", "Center", "Rear"];
+            current: device.position;
+            label: "Surround position of " + device.name;
+            selected(position) => { root.position-changed(position); }
+        }
+    }
+    delay-slider := LabeledSlider {
+        title: "Delay";
+        label: "Delay in milliseconds for " + device.name;
+        minimum: 0;
+        maximum: 500;
+        value: device.delay;
+        value-text: round(self.value) + " ms";
+        changed(value) => { root.delay-changed(value); }
+    }
+    volume-slider := LabeledSlider {
+        title: "Volume";
+        label: "Volume for " + device.name;
+        value: device.volume;
+        value-text: round(self.value) + " %";
+        changed(value) => { root.volume-changed(value); }
+    }
+    // The lowest slider position means off (below the 40 Hz minimum).
+    bass-slider := LabeledSlider {
+        title: "Bass cut";
+        label: "Bass cut in hertz for " + device.name + "; lowest position is off";
+        minimum: 30;
+        maximum: 300;
+        value: device.bass-cut;
+        value-text: self.value < 40 ? "Off" : round(self.value) + " Hz";
+        changed(value) => { root.bass-cut-changed(value); }
+    }
+    virtual-bass-slider := LabeledSlider {
+        title: "Virtual bass";
+        label: "Virtual bass in percent for " + device.name;
+        value: device.virtual-bass;
+        value-text: self.value < 1 ? "Off" : round(self.value) + " %";
+        changed(value) => { root.virtual-bass-changed(value); }
     }
 }
 
@@ -298,7 +279,6 @@ component SpaceCard inherits Card {
             padding-bottom: 10px;
             spacing: 28px;
             LabeledSlider {
-                width: 220px;
                 title: "Stereo width";
                 label: "Stereo width in percent; 100 is unchanged, 0 is mono";
                 maximum: 200;
@@ -332,10 +312,8 @@ component DeviceCard inherits Card {
     callback ping();
     callback position-changed(int);
     callback collapsed-changed(bool);
-    in property <bool> following;
     callback bass-cut-changed(float);
     callback virtual-bass-changed(float);
-    callback max-volume-changed(float);
     callback checked-changed(bool);
     callback make-default();
     callback mode-changed(int);
@@ -456,10 +434,8 @@ component DeviceCard inherits Card {
         if device.checked && !device.is-source && !device.collapsed: DeviceControls {
             device: root.device;
             position-changed(position) => { root.position-changed(position); }
-            following: root.following;
             bass-cut-changed(value) => { root.bass-cut-changed(value); }
             virtual-bass-changed(value) => { root.virtual-bass-changed(value); }
-            max-volume-changed(value) => { root.max-volume-changed(value); }
             mode-changed(mode) => { root.mode-changed(mode); }
             delay-changed(value) => { root.delay-changed(value); }
             volume-changed(value) => { root.volume-changed(value); }
@@ -750,8 +726,8 @@ export component MainWindow inherits Window {
     title: "JOPL-StereoBT";
     icon: @image-url("icon.png");
     background: Theme.window;
-    min-width: 980px;
-    preferred-width: 1120px;
+    min-width: 1100px;
+    preferred-width: 1280px;
     min-height: 560px;
     preferred-height: 800px;
     default-font-size: 13px;
@@ -809,7 +785,6 @@ export component MainWindow inherits Window {
     callback volume-changed(string, float);
     callback bass-cut-changed(string, float);
     callback virtual-bass-changed(string, float);
-    callback max-volume-changed(string, float);
     // Level meter fill per device row; negative while not playing.
     in property <[int]> levels;
     callback ping(string);
@@ -834,7 +809,7 @@ export component MainWindow inherits Window {
     HorizontalLayout {
         // Navigation rail.
         VerticalLayout {
-            width: 260px;
+            width: 220px;
             padding: 6px;
             padding-top: 8px;
             padding-bottom: 8px;
@@ -963,10 +938,8 @@ export component MainWindow inherits Window {
                             mode-changed(mode) => { root.mode-changed(row.id, mode); }
                             delay-changed(value) => { root.delay-changed(row.id, value); }
                             volume-changed(value) => { root.volume-changed(row.id, value); }
-                            following: root.follow-system-volume;
                             bass-cut-changed(value) => { root.bass-cut-changed(row.id, value); }
                             virtual-bass-changed(value) => { root.virtual-bass-changed(row.id, value); }
-                            max-volume-changed(value) => { root.max-volume-changed(row.id, value); }
                         }
                         }
                         if root.devices.length == 0: Description {

@@ -23,9 +23,6 @@ pub(crate) struct DeviceSettings {
     pub(crate) bass_cut: BassCut,
     #[serde(default)]
     pub(crate) virtual_bass: VirtualBass,
-    /// The device's own volume while following the system volume.
-    #[serde(default)]
-    pub(crate) max_volume: Volume,
     /// Where the speaker stands in a surround setup (F20).
     #[serde(default)]
     pub(crate) position: SpeakerPosition,
@@ -45,7 +42,6 @@ impl DeviceSettings {
             channel_mode: ChannelMode::Stereo,
             bass_cut: BassCut::OFF,
             virtual_bass: VirtualBass::OFF,
-            max_volume: Volume::FULL,
             position: SpeakerPosition::Front,
             collapsed: false,
         }
@@ -123,7 +119,6 @@ impl Settings {
                     channel_mode: d.channel_mode,
                     bass_cut: d.bass_cut,
                     virtual_bass: d.virtual_bass,
-                    max_volume: d.max_volume,
                     position: d.position,
                 })
                 .collect(),
@@ -204,7 +199,16 @@ channel-mode = \"stereo\"
         let device = &settings.devices[0];
         assert_eq!(device.bass_cut, BassCut::OFF);
         assert_eq!(device.virtual_bass, VirtualBass::OFF);
-        assert_eq!(device.max_volume, Volume::FULL);
+    }
+
+    #[test]
+    fn files_with_the_removed_speaker_volume_limit_still_load() {
+        let old = "[[devices]]\nid = \"a\"\nname = \"A\"\nenabled = true\n\
+                   delay = 0\nvolume = 80\nchannel-mode = \"stereo\"\nmax-volume = 70\n";
+
+        let settings: Settings = toml::from_str(old).unwrap();
+
+        assert_eq!(settings.devices[0].volume.as_percent(), 80);
     }
 
     #[test]
@@ -215,13 +219,11 @@ channel-mode = \"stereo\"
         device.enabled = true;
         device.bass_cut = BassCut::from_hz(150).unwrap();
         device.virtual_bass = VirtualBass::from_percent(40).unwrap();
-        device.max_volume = Volume::from_percent(70).unwrap();
 
         let output = &settings.engine_config().outputs[0];
 
         assert_eq!(output.bass_cut.hz(), Some(150));
         assert_eq!(output.virtual_bass.as_percent(), 40);
-        assert_eq!(output.max_volume.as_percent(), 70);
     }
 
     #[test]

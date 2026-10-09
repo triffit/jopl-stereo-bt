@@ -79,7 +79,6 @@ pub(crate) struct DeviceRow {
     /// `0` when off.
     pub(crate) bass_cut_hz: u16,
     pub(crate) virtual_bass_percent: u8,
-    pub(crate) max_volume_percent: u8,
     /// Battery level in percent, for devices that report one.
     pub(crate) battery_percent: Option<u8>,
     pub(crate) position: SpeakerPosition,
@@ -180,7 +179,6 @@ fn row(
         volume_percent: device.volume.as_percent(),
         bass_cut_hz: device.bass_cut.as_hz(),
         virtual_bass_percent: device.virtual_bass.as_percent(),
-        max_volume_percent: device.max_volume.as_percent(),
         position: device.position,
         collapsed: device.collapsed,
         summary: summary(device),
