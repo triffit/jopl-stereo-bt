@@ -13,6 +13,22 @@ pub enum Error {
         /// The rejected value in percent.
         percent: u8,
     },
+    /// The bass cut is neither off nor within its range.
+    #[error(
+        "bass cut of {hz} Hz is out of range (0 for off, or {min}..={max} Hz)",
+        min = crate::BassCut::MIN_HZ,
+        max = crate::BassCut::MAX_HZ
+    )]
+    BassCutOutOfRange {
+        /// The rejected value in hertz.
+        hz: u16,
+    },
+    /// The requested virtual bass exceeds 100 %.
+    #[error("virtual bass of {percent} % is out of range (0..=100 %)")]
+    VirtualBassOutOfRange {
+        /// The rejected value in percent.
+        percent: u8,
+    },
     /// The sample rate is outside the supported range.
     #[error(
         "sample rate of {hz} Hz is out of range ({min}..={max} Hz)",

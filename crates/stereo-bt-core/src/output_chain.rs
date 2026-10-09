@@ -1,7 +1,12 @@
-use crate::{ChannelMode, Delay, DelayLine, Frame, SampleRate, Volume};
+use crate::{
+    BassCut, BassShaper, ChannelMode, Delay, DelayLine, Frame, Limiter, SampleRate, VirtualBass,
+    Volume,
+};
 
-/// The per-device processing chain: delay, channel mapping, then gain
-/// (device volume times the shared master gain).
+/// The per-device processing chain: delay, channel mapping, bass shaping
+/// (bass cut and virtual bass), gain (device volume times the shared master
+/// gain), then a limiter. Nothing in it adds latency beyond the delay, so
+/// sound settings never move a device out of sync.
 ///
 /// Gain changes ramp linearly across one processed block, so volume moves
 /// never click. Never allocates after construction; safe on a real-time
@@ -10,6 +15,8 @@ use crate::{ChannelMode, Delay, DelayLine, Frame, SampleRate, Volume};
 pub struct OutputChain {
     delay_line: DelayLine,
     channel_mode: ChannelMode,
+    bass: BassShaper,
+    limiter: Limiter,
     volume_gain: f32,
     master_gain: f32,
     /// The gain applied at the end of the previous block.
@@ -23,6 +30,8 @@ impl OutputChain {
         Self {
             delay_line: DelayLine::new(sample_rate),
             channel_mode: ChannelMode::default(),
+            bass: BassShaper::new(sample_rate),
+            limiter: Limiter::new(sample_rate),
             volume_gain: Volume::default().gain(),
             master_gain: 1.0,
             current_gain: Volume::default().gain(),
@@ -37,6 +46,16 @@ impl OutputChain {
     /// Sets which part of the stereo signal this device plays.
     pub fn set_channel_mode(&mut self, mode: ChannelMode) {
         self.channel_mode = mode;
+    }
+
+    /// Sets the high-pass cutoff for small speakers.
+    pub fn set_bass_cut(&mut self, cut: BassCut) {
+        self.bass.set_bass_cut(cut);
+    }
+
+    /// Sets how much virtual bass is added.
+    pub fn set_virtual_bass(&mut self, amount: VirtualBass) {
+        self.bass.set_virtual_bass(amount);
     }
 
     /// Sets the device volume.
@@ -62,10 +81,51 @@ impl OutputChain {
             let progress = (index + 1) as f32 / steps;
             let gain = start + (target - start) * progress;
             let delayed = self.delay_line.process_frame(*frame);
-            *frame = self.channel_mode.apply(delayed).scaled(gain);
+            let shaped = self.bass.process_frame(self.channel_mode.apply(delayed));
+            *frame = self.limiter.process_frame(shaped.scaled(gain));
         }
         if !frames.is_empty() {
             self.current_gain = target;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sine(hz: f32, amplitude: f32, frames: usize) -> Vec<Frame> {
+        (0..frames)
+            .map(|n| {
+                #[allow(clippy::cast_precision_loss)]
+                let x = amplitude * (std::f32::consts::TAU * hz * n as f32 / 48_000.0).sin();
+                Frame::new(x, x)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn default_chain_passes_audio_unchanged() {
+        let mut chain = OutputChain::new(SampleRate::HZ_48000);
+        let input = sine(440.0, 0.8, 480);
+        let mut frames = input.clone();
+
+        chain.process(&mut frames);
+
+        assert_eq!(frames, input);
+    }
+
+    #[test]
+    fn loud_virtual_bass_is_limited_to_full_scale() {
+        let mut chain = OutputChain::new(SampleRate::HZ_48000);
+        chain.set_bass_cut(BassCut::from_hz(150).unwrap());
+        chain.set_virtual_bass(VirtualBass::from_percent(100).unwrap());
+        let mut frames = sine(60.0, 1.0, 48_000);
+
+        chain.process(&mut frames);
+
+        let peak = frames.iter().map(|f| f.left.abs()).fold(0.0, f32::max);
+        assert!(peak <= 1.0 + 1e-6, "{peak}");
+        assert!(peak > 0.5, "the bass is still heard: {peak}");
     }
 }

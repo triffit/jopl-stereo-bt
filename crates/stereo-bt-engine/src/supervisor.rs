@@ -1,7 +1,7 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use stereo_bt_core::{DeviceId, DeviceInfo, MutedApp, SystemVolume};
+use stereo_bt_core::{DeviceId, DeviceInfo, MutedApp, SystemVolume, Volume};
 
 use crate::click_track::{ClickTrack, TestSignal};
 use crate::{
@@ -13,7 +13,8 @@ use crate::{
 const MUTED_APP_CHECK: Duration = Duration::from_secs(1);
 
 /// Volumes at or above this slider position count as full.
-const FULL_VOLUME: f32 = 0.999;
+/// Device volumes this close (as Windows scalars) count as equal.
+const VOLUME_TOLERANCE: f32 = 0.001;
 
 /// Time between clicks of the assisted-sync click track.
 pub(crate) const CLICK_PERIOD_MILLIS: u32 = 1_000;
@@ -103,8 +104,11 @@ pub struct Supervisor<P: Platform, J: RestoreJournal> {
     running: bool,
     active: Option<ActiveSession<P::Backend>>,
     muted_by_us: Vec<DeviceId>,
-    /// Target devices we raised to full volume, with their original volume.
+    /// Target devices whose volume we set while following, with their
+    /// original volume (journaled).
     boosted: Vec<(DeviceId, f32)>,
+    /// The volume we last set on each boosted device.
+    applied_volumes: Vec<(DeviceId, f32)>,
     session_starts: u64,
     devices: Vec<DeviceInfo>,
     system_volume: Option<SystemVolume>,
@@ -133,6 +137,7 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
             active: None,
             muted_by_us,
             boosted,
+            applied_volumes: Vec::new(),
             session_starts: 0,
             devices: Vec::new(),
             system_volume: None,
@@ -415,37 +420,70 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
     /// and restored when no longer needed; a device that cannot be restored
     /// right now (disconnected) is retried on the next reconcile.
     fn reconcile_volumes(&mut self) -> Result<(), SupervisorError> {
-        let wanted: Vec<DeviceId> = match &self.active {
-            Some(active) if self.running && self.config.follow_system_volume => {
-                active.session.output_ids()
-            }
+        // Each playing target, with the volume it should have (F15 limit).
+        let wanted: Vec<(DeviceId, f32)> = match &self.active {
+            Some(active) if self.running && self.config.follow_system_volume => active
+                .session
+                .output_ids()
+                .into_iter()
+                .map(|id| {
+                    let limit = self
+                        .config
+                        .outputs
+                        .iter()
+                        .find(|o| o.id == id)
+                        .map_or(Volume::FULL, |o| o.max_volume);
+                    (id, f32::from(limit.as_percent()) / 100.0)
+                })
+                .collect(),
             _ => Vec::new(),
         };
         let before = self.boosted.len();
         let platform = &self.platform;
         self.boosted.retain(|(id, original)| {
-            wanted.contains(id) || platform.set_volume(id, *original).is_err()
+            wanted.iter().any(|(w, _)| w == id) || platform.set_volume(id, *original).is_err()
         });
+        self.applied_volumes
+            .retain(|(id, _)| self.boosted.iter().any(|(b, _)| b == id));
         if self.boosted.len() != before {
             self.journal.save_volumes(&self.boosted)?;
         }
-        for id in wanted {
+        for (id, target) in wanted {
             if self.boosted.iter().any(|(boosted, _)| boosted == &id) {
+                let applied = self
+                    .applied_volumes
+                    .iter()
+                    .find(|(a, _)| a == &id)
+                    .map(|(_, v)| *v);
+                if applied.is_none_or(|v| (v - target).abs() > VOLUME_TOLERANCE) {
+                    self.platform
+                        .set_volume(&id, target)
+                        .map_err(platform_error)?;
+                    self.remember_applied(id, target);
+                }
                 continue;
             }
             // A device that cannot be queried right now is tried again later.
             let Ok(volume) = self.platform.system_volume(&id) else {
                 continue;
             };
-            if volume.scalar() >= FULL_VOLUME {
+            if (volume.scalar() - target).abs() <= VOLUME_TOLERANCE {
                 continue;
             }
             // Record first: a crash between the two steps only causes a harmless restore.
             self.boosted.push((id.clone(), volume.scalar()));
             self.journal.save_volumes(&self.boosted)?;
-            self.platform.set_volume(&id, 1.0).map_err(platform_error)?;
+            self.platform
+                .set_volume(&id, target)
+                .map_err(platform_error)?;
+            self.remember_applied(id, target);
         }
         Ok(())
+    }
+
+    fn remember_applied(&mut self, id: DeviceId, volume: f32) {
+        self.applied_volumes.retain(|(a, _)| a != &id);
+        self.applied_volumes.push((id, volume));
     }
 
     /// Keeps the click track playing on the current source while wanted.
@@ -569,6 +607,8 @@ fn apply_live<B: Backend>(session: &Session<B>, output: &OutputConfig) {
     let _ = session.set_delay(&output.id, output.delay);
     let _ = session.set_volume(&output.id, output.volume);
     let _ = session.set_channel_mode(&output.id, output.channel_mode);
+    let _ = session.set_bass_cut(&output.id, output.bass_cut);
+    let _ = session.set_virtual_bass(&output.id, output.virtual_bass);
 }
 
 fn platform_error(error: impl std::error::Error + Send + Sync + 'static) -> SupervisorError {
@@ -765,6 +805,32 @@ mod tests {
 
         assert!((scalar(&w, "B") - 0.1).abs() < f32::EPSILON);
         assert!(lock(&record).is_empty());
+    }
+
+    #[test]
+    fn f15_max_volume_caps_the_device_volume_while_following() {
+        let w = world("A", &["A", "B"]);
+        lock(&w)
+            .volumes
+            .insert(id("B"), SystemVolume::new(0.0, 1.0, false));
+        let (mut s, record) = supervisor_with_volumes(&w, &[]);
+        let mut cfg = config(&["B"], true);
+        cfg.outputs[0].max_volume = Volume::from_percent(70).unwrap();
+
+        s.start(cfg.clone()).unwrap();
+
+        assert!((scalar(&w, "B") - 0.7).abs() < 1e-6);
+        assert_eq!(*lock(&record), vec![(id("B"), 1.0)], "original journaled");
+
+        cfg.outputs[0].max_volume = Volume::from_percent(55).unwrap();
+        s.update(cfg).unwrap();
+        assert!(
+            (scalar(&w, "B") - 0.55).abs() < 1e-6,
+            "a new limit applies live"
+        );
+
+        s.stop().unwrap();
+        assert!((scalar(&w, "B") - 1.0).abs() < f32::EPSILON, "restored");
     }
 
     #[test]

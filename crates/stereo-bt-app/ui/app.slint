@@ -23,6 +23,10 @@ export struct DeviceRow {
     mode: int,
     delay: float,
     volume: float,
+    // Bass cut slider position: 30 means off.
+    bass-cut: float,
+    virtual-bass: float,
+    max-volume: float,
 }
 
 // One lane of the timing overview, in milliseconds.
@@ -112,12 +116,55 @@ component CardHeader inherits HorizontalLayout {
     @children
 }
 
-// Channels, delay and volume of one playing device.
-component DeviceControls inherits HorizontalLayout {
+// A labelled slider with its value, e.g. "Delay  [----o--]  41 ms".
+component LabeledSlider inherits VerticalLayout {
+    in property <string> title;
+    in property <string> label;
+    in property <string> value-text;
+    in property <float> minimum: 0;
+    in property <float> maximum: 100;
+    in property <bool> enabled: true;
+    in-out property <float> value;
+    callback changed(float);
+
+    spacing: 0;
+    horizontal-stretch: 1;
+    Description {
+        text: root.title;
+        color: Theme.text-2;
+    }
+    HorizontalLayout {
+        spacing: 12px;
+        Slider {
+            minimum: root.minimum;
+            maximum: root.maximum;
+            value <=> root.value;
+            enabled: root.enabled;
+            label: root.label;
+            changed(value) => { root.changed(value); }
+        }
+        Text {
+            text: root.value-text;
+            color: root.enabled ? Theme.text : Theme.text-3;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            min-width: 52px;
+        }
+    }
+}
+
+// Every setting of one playing device: channels, delay and volume, then
+// the sound row for small speakers (bass cut, virtual bass, speaker limit).
+component DeviceControls inherits VerticalLayout {
     in property <DeviceRow> device;
+    // The speaker volume limit only acts while following the system volume.
+    in property <bool> following;
     callback mode-changed(int);
     callback delay-changed(float);
     callback volume-changed(float);
+    callback bass-cut-changed(float);
+    callback virtual-bass-changed(float);
+    callback max-volume-changed(float);
 
     // User interaction replaces a control's value binding, so push
     // external changes (e.g. applied measurements) in explicitly.
@@ -125,81 +172,86 @@ component DeviceControls inherits HorizontalLayout {
         volume-slider.value = device.volume;
         delay-slider.value = device.delay;
         mode-picker.current = device.mode;
+        bass-slider.value = device.bass-cut;
+        virtual-bass-slider.value = device.virtual-bass;
+        max-volume-slider.value = device.max-volume;
     }
 
     padding-left: 56px;
     padding-right: 16px;
     padding-top: 12px;
     padding-bottom: 14px;
-    spacing: 28px;
-    VerticalLayout {
-        spacing: 6px;
-        Description {
-            text: "Channels";
-            color: Theme.text-2;
-        }
-        mode-picker := Segmented {
+    spacing: 12px;
+    HorizontalLayout {
+        spacing: 28px;
+        VerticalLayout {
+            spacing: 6px;
             width: 248px;
-            options: ["Stereo", "Left", "Right", "Mono"];
-            current: device.mode;
-            label: "Channels for " + device.name;
-            selected(mode) => { root.mode-changed(mode); }
+            Description {
+                text: "Channels";
+                color: Theme.text-2;
+            }
+            mode-picker := Segmented {
+                options: ["Stereo", "Left", "Right", "Mono"];
+                current: device.mode;
+                label: "Channels for " + device.name;
+                selected(mode) => { root.mode-changed(mode); }
+            }
+        }
+        delay-slider := LabeledSlider {
+            title: "Delay";
+            label: "Delay in milliseconds for " + device.name;
+            minimum: 0;
+            maximum: 500;
+            value: device.delay;
+            value-text: round(self.value) + " ms";
+            changed(value) => { root.delay-changed(value); }
+        }
+        volume-slider := LabeledSlider {
+            title: "Volume";
+            label: "Volume for " + device.name;
+            value: device.volume;
+            value-text: round(self.value);
+            changed(value) => { root.volume-changed(value); }
         }
     }
-    VerticalLayout {
-        spacing: 0;
-        horizontal-stretch: 1;
-        Description {
-            text: "Delay";
-            color: Theme.text-2;
+    HorizontalLayout {
+        spacing: 28px;
+        // The lowest slider position means off (below the 40 Hz minimum).
+        bass-slider := LabeledSlider {
+            width: 248px;
+            title: "Bass cut";
+            label: "Bass cut in hertz for " + device.name + "; lowest position is off";
+            minimum: 30;
+            maximum: 300;
+            value: device.bass-cut;
+            value-text: self.value < 40 ? "Off" : round(self.value) + " Hz";
+            changed(value) => { root.bass-cut-changed(value); }
         }
-        HorizontalLayout {
-            spacing: 12px;
-            delay-slider := Slider {
-                minimum: 0;
-                maximum: 500;
-                value: device.delay;
-                label: "Delay in milliseconds for " + device.name;
-                changed(value) => { root.delay-changed(value); }
-            }
-            Text {
-                text: round(delay-slider.value) + " ms";
-                color: Theme.text;
-                horizontal-alignment: right;
-                vertical-alignment: center;
-                min-width: 52px;
-            }
+        virtual-bass-slider := LabeledSlider {
+            title: "Virtual bass";
+            label: "Virtual bass in percent for " + device.name;
+            value: device.virtual-bass;
+            value-text: self.value < 1 ? "Off" : round(self.value) + " %";
+            changed(value) => { root.virtual-bass-changed(value); }
         }
-    }
-    VerticalLayout {
-        spacing: 0;
-        horizontal-stretch: 1;
-        Description {
-            text: "Volume";
-            color: Theme.text-2;
-        }
-        HorizontalLayout {
-            spacing: 12px;
-            volume-slider := Slider {
-                minimum: 0;
-                maximum: 100;
-                value: device.volume;
-                label: "Volume for " + device.name;
-                changed(value) => { root.volume-changed(value); }
-            }
-            Text {
-                text: round(volume-slider.value);
-                color: Theme.text;
-                horizontal-alignment: right;
-                vertical-alignment: center;
-                min-width: 30px;
-            }
+        max-volume-slider := LabeledSlider {
+            title: root.following ? "Speaker volume limit" : "Speaker volume limit (with Follow system volume)";
+            label: "Speaker volume limit in percent for " + device.name + (root.following ? "" : "; only used while following the system volume");
+            enabled: root.following;
+            value: device.max-volume;
+            value-text: round(self.value) + " %";
+            changed(value) => { root.max-volume-changed(value); }
         }
     }
 }
 
 component DeviceCard inherits Card {
     in property <DeviceRow> device;
+    in property <bool> following;
+    callback bass-cut-changed(float);
+    callback virtual-bass-changed(float);
+    callback max-volume-changed(float);
     callback checked-changed(bool);
     callback make-default();
     callback mode-changed(int);
@@ -268,6 +320,10 @@ component DeviceCard inherits Card {
         if device.checked && !device.is-source: Separator { }
         if device.checked && !device.is-source: DeviceControls {
             device: root.device;
+            following: root.following;
+            bass-cut-changed(value) => { root.bass-cut-changed(value); }
+            virtual-bass-changed(value) => { root.virtual-bass-changed(value); }
+            max-volume-changed(value) => { root.max-volume-changed(value); }
             mode-changed(mode) => { root.mode-changed(mode); }
             delay-changed(value) => { root.delay-changed(value); }
             volume-changed(value) => { root.volume-changed(value); }
@@ -615,6 +671,9 @@ export component MainWindow inherits Window {
     callback mode-changed(string, int);
     callback delay-changed(string, float);
     callback volume-changed(string, float);
+    callback bass-cut-changed(string, float);
+    callback virtual-bass-changed(string, float);
+    callback max-volume-changed(string, float);
 
     property <bool> busy: root.assistant.active || root.measure.active;
 
@@ -753,6 +812,10 @@ export component MainWindow inherits Window {
                             mode-changed(mode) => { root.mode-changed(row.id, mode); }
                             delay-changed(value) => { root.delay-changed(row.id, value); }
                             volume-changed(value) => { root.volume-changed(row.id, value); }
+                            following: root.follow-system-volume;
+                            bass-cut-changed(value) => { root.bass-cut-changed(row.id, value); }
+                            virtual-bass-changed(value) => { root.virtual-bass-changed(row.id, value); }
+                            max-volume-changed(value) => { root.max-volume-changed(row.id, value); }
                         }
                         }
                         if root.devices.length == 0: Description {

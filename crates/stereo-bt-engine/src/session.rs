@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 
 use rtrb::{Consumer, Producer, RingBuffer};
-use stereo_bt_core::{ChannelMode, Delay, DeviceId, Frame, Playout, SampleRate, Volume};
+use stereo_bt_core::{
+    BassCut, ChannelMode, Delay, DeviceId, Frame, Playout, SampleRate, VirtualBass, Volume,
+};
 
 use crate::backend::{Backend, CaptureStream, RenderSink};
 use crate::fan_out::FanOut;
@@ -247,6 +249,18 @@ impl<B: Backend> Session<B> {
     #[must_use]
     pub fn set_channel_mode(&self, id: &DeviceId, mode: ChannelMode) -> bool {
         self.with_output(id, |c| c.set_channel_mode(mode))
+    }
+
+    /// Changes an output's bass cut live. Returns `false` for an unknown device.
+    #[must_use]
+    pub fn set_bass_cut(&self, id: &DeviceId, cut: BassCut) -> bool {
+        self.with_output(id, |c| c.set_bass_cut(cut))
+    }
+
+    /// Changes an output's virtual bass live. Returns `false` for an unknown device.
+    #[must_use]
+    pub fn set_virtual_bass(&self, id: &DeviceId, amount: VirtualBass) -> bool {
+        self.with_output(id, |c| c.set_virtual_bass(amount))
     }
 
     /// Stops all streams and waits for their threads to finish.

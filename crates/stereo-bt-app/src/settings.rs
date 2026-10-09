@@ -2,7 +2,7 @@
 //! endpoint identifier, remembered across sessions and reconnects.
 
 use serde::{Deserialize, Serialize};
-use stereo_bt_core::{ChannelMode, Delay, DeviceId, DeviceInfo, Volume};
+use stereo_bt_core::{BassCut, ChannelMode, Delay, DeviceId, DeviceInfo, VirtualBass, Volume};
 use stereo_bt_engine::{EngineConfig, OutputConfig};
 
 /// Settings for one device, remembered even while it is disconnected.
@@ -16,6 +16,14 @@ pub(crate) struct DeviceSettings {
     pub(crate) delay: Delay,
     pub(crate) volume: Volume,
     pub(crate) channel_mode: ChannelMode,
+    /// High-pass cutoff for small speakers (F15); missing in older files.
+    #[serde(default)]
+    pub(crate) bass_cut: BassCut,
+    #[serde(default)]
+    pub(crate) virtual_bass: VirtualBass,
+    /// The device's own volume while following the system volume.
+    #[serde(default)]
+    pub(crate) max_volume: Volume,
 }
 
 impl DeviceSettings {
@@ -27,6 +35,9 @@ impl DeviceSettings {
             delay: Delay::ZERO,
             volume: Volume::FULL,
             channel_mode: ChannelMode::Stereo,
+            bass_cut: BassCut::OFF,
+            virtual_bass: VirtualBass::OFF,
+            max_volume: Volume::FULL,
         }
     }
 }
@@ -97,6 +108,9 @@ impl Settings {
                     delay: d.delay,
                     volume: d.volume,
                     channel_mode: d.channel_mode,
+                    bass_cut: d.bass_cut,
+                    virtual_bass: d.virtual_bass,
+                    max_volume: d.max_volume,
                 })
                 .collect(),
             include_default: self.include_default,
@@ -157,6 +171,42 @@ mod tests {
         assert_eq!(config.outputs[0].id.as_str(), "b");
         assert_eq!(config.outputs[0].delay.as_millis(), 42);
         assert!(config.include_default);
+    }
+
+    #[test]
+    fn f15_device_files_without_sound_settings_load_with_them_off() {
+        let old = "[[devices]]
+id = \"a\"
+name = \"A\"
+enabled = true
+                   delay = 0
+volume = 80
+channel-mode = \"stereo\"
+";
+
+        let settings: Settings = toml::from_str(old).unwrap();
+
+        let device = &settings.devices[0];
+        assert_eq!(device.bass_cut, BassCut::OFF);
+        assert_eq!(device.virtual_bass, VirtualBass::OFF);
+        assert_eq!(device.max_volume, Volume::FULL);
+    }
+
+    #[test]
+    fn f15_sound_settings_reach_the_engine() {
+        let mut settings = Settings::default();
+        settings.learn(&[info("a", "A")]);
+        let device = &mut settings.devices[0];
+        device.enabled = true;
+        device.bass_cut = BassCut::from_hz(150).unwrap();
+        device.virtual_bass = VirtualBass::from_percent(40).unwrap();
+        device.max_volume = Volume::from_percent(70).unwrap();
+
+        let output = &settings.engine_config().outputs[0];
+
+        assert_eq!(output.bass_cut.hz(), Some(150));
+        assert_eq!(output.virtual_bass.as_percent(), 40);
+        assert_eq!(output.max_volume.as_percent(), 70);
     }
 
     #[test]

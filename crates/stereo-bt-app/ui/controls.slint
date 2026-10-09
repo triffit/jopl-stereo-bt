@@ -40,6 +40,7 @@ export component Slider inherits Rectangle {
     // in-out: the user moves it; owners push external changes back in.
     in-out property <float> value;
     in property <string> label;
+    in property <bool> enabled: true;
     callback changed(float);
 
     property <length> thumb: 20px;
@@ -57,7 +58,9 @@ export component Slider inherits Rectangle {
     min-height: 32px;
     min-width: 80px;
     horizontal-stretch: 1;
+    opacity: root.enabled ? 1 : 0.4;
     accessible-role: slider;
+    accessible-enabled: root.enabled;
     accessible-label: root.label;
     accessible-value: round(root.value);
     accessible-value-minimum: root.minimum;
@@ -67,6 +70,7 @@ export component Slider inherits Rectangle {
     accessible-action-decrement => { root.set(root.value - 1); }
 
     focus := FocusScope {
+        enabled: root.enabled;
         key-pressed(event) => {
             if (event.text == Key.RightArrow || event.text == Key.UpArrow) {
                 root.set(root.value + 1);
@@ -135,6 +139,7 @@ export component Slider inherits Rectangle {
         }
 
         touch := TouchArea {
+            enabled: root.enabled;
             mouse-cursor: pointer;
             pointer-event(event) => {
                 if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {

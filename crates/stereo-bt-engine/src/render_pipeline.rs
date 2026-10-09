@@ -80,6 +80,8 @@ impl RenderPipeline {
         self.chain.set_delay(self.controls.delay());
         self.chain.set_volume(self.controls.volume());
         self.chain.set_channel_mode(self.controls.channel_mode());
+        self.chain.set_bass_cut(self.controls.bass_cut());
+        self.chain.set_virtual_bass(self.controls.virtual_bass());
         self.chain.set_master_gain(self.controls.master_gain());
     }
 }
@@ -111,9 +113,11 @@ mod tests {
         (producer, pipeline, controls)
     }
 
+    /// Numbered frames (`i / 16`), within full scale so the limiter
+    /// leaves them alone.
     fn ramp(from: u8, to: u8) -> Vec<Frame> {
         (from..=to)
-            .map(|i| Frame::new(f32::from(i), -f32::from(i)))
+            .map(|i| Frame::new(f32::from(i) / 16.0, -f32::from(i) / 16.0))
             .collect()
     }
 
@@ -177,7 +181,7 @@ mod tests {
 
         let played = play(&mut pipeline, 3, 4);
 
-        assert_close(&audible(&played)[..1], &[Frame::new(7.0, -7.0)]);
+        assert_close(&audible(&played)[..1], &ramp(7, 7));
     }
 
     #[test]
@@ -199,7 +203,10 @@ mod tests {
 
         let played = play(&mut pipeline, 2, 4);
 
-        assert_close(&audible(&played)[..1], &[Frame::new(1.0, 1.0)]);
+        assert_close(
+            &audible(&played)[..1],
+            &[Frame::new(1.0 / 16.0, 1.0 / 16.0)],
+        );
     }
 
     #[test]
@@ -212,7 +219,7 @@ mod tests {
 
         let first = played.iter().position(|f| *f != Frame::SILENCE);
         assert_eq!(first, Some(48 + RESAMPLER_LATENCY));
-        assert_eq!(played[48 + RESAMPLER_LATENCY], Frame::new(1.0, -1.0));
+        assert_eq!(played[48 + RESAMPLER_LATENCY], ramp(1, 1)[0]);
     }
 
     #[test]

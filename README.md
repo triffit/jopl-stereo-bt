@@ -20,7 +20,14 @@ The exe is `target/release/jopl-stereo-bt.exe`.
 1. **Devices**: switch on the devices to play on and pick channels, delay and volume.
 2. Press **Play on multiple devices**.
 3. **Sync**: measure with the microphone (or sync by ear) to align the devices.
-4. **Settings**: keep the default device playing, follow the system volume, keep playing
+4. **Small speakers** (e.g. JBL Go), per device on **Devices**:
+   - **Bass cut**: removes bass the speaker cannot play, so it sounds louder and cleaner
+     (try 120–180 Hz; lowest position is off).
+   - **Virtual bass**: adds harmonics so the cut bass is still heard (try 30–60 %).
+   - **Speaker volume limit**: the speaker's own volume while following the system volume;
+     lower it if the speaker distorts at full volume.
+   - A limiter always prevents clipping.
+5. **Settings**: keep the default device playing, follow the system volume, keep playing
    when the window is closed.
 
 ## Troubleshooting

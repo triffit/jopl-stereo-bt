@@ -73,6 +73,10 @@ pub(crate) struct DeviceRow {
     pub(crate) channel_mode: ChannelMode,
     pub(crate) delay_ms: u16,
     pub(crate) volume_percent: u8,
+    /// `0` when off.
+    pub(crate) bass_cut_hz: u16,
+    pub(crate) virtual_bass_percent: u8,
+    pub(crate) max_volume_percent: u8,
 }
 
 /// One lane of the timing overview: when a device is heard.
@@ -164,6 +168,9 @@ fn row(
         channel_mode: device.channel_mode,
         delay_ms: device.delay.as_millis(),
         volume_percent: device.volume.as_percent(),
+        bass_cut_hz: device.bass_cut.as_hz(),
+        virtual_bass_percent: device.virtual_bass.as_percent(),
+        max_volume_percent: device.max_volume.as_percent(),
     }
 }
 

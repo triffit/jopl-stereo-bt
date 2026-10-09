@@ -87,6 +87,13 @@ where
     );
     window.on_delay_changed(bind.device(|c, id, millis: f32| c.set_delay(id, round(millis))));
     window.on_volume_changed(bind.device(|c, id, percent: f32| c.set_volume(id, round(percent))));
+    window.on_bass_cut_changed(bind.device(|c, id, hz: f32| c.set_bass_cut(id, round(hz))));
+    window.on_virtual_bass_changed(
+        bind.device(|c, id, percent: f32| c.set_virtual_bass(id, round(percent))),
+    );
+    window.on_max_volume_changed(
+        bind.device(|c, id, percent: f32| c.set_max_volume(id, round(percent))),
+    );
 
     // Without a tray (e.g. no taskbar) the app cannot be reached when hidden,
     // so closing the window then always quits.
@@ -435,6 +442,14 @@ fn to_ui_row(row: &DeviceRow, heading: &str) -> generated::DeviceRow {
         mode: mode_to_index(row.channel_mode),
         delay: f32::from(row.delay_ms),
         volume: f32::from(row.volume_percent),
+        // The bass cut slider's lowest position (30) stands for off.
+        bass_cut: if row.bass_cut_hz == 0 {
+            30.0
+        } else {
+            f32::from(row.bass_cut_hz)
+        },
+        virtual_bass: f32::from(row.virtual_bass_percent),
+        max_volume: f32::from(row.max_volume_percent),
     }
 }
 

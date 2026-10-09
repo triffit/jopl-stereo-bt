@@ -47,8 +47,9 @@ impl CaptureStream for FakeCapture {
         thread::sleep(Duration::from_millis(10));
         for frame in &mut self.block {
             self.next += 1;
-            // Ramp stays below 2^24, so every value is exact in f32.
-            let value = f32::from(u16::try_from(self.next % 60_000).unwrap());
+            // A power-of-two step keeps every value exact in f32, and the
+            // ramp below full scale, so the output limiter leaves it alone.
+            let value = f32::from(u16::try_from(self.next % 60_000).unwrap()) * STEP;
             *frame = Frame::new(value, -value);
         }
         self.produced.fetch_add(BLOCK, Ordering::Relaxed);
@@ -161,14 +162,17 @@ fn audible(frames: &[Frame]) -> Vec<Frame> {
     frames
         .iter()
         .copied()
-        .filter(|f| f.left.abs() > 0.5 || f.right.abs() > 0.5)
+        .filter(|f| f.left.abs() > 0.5 * STEP || f.right.abs() > 0.5 * STEP)
         .collect()
 }
 
+/// One step of the test ramp.
+const STEP: f32 = 1.0 / 65_536.0;
+
 /// The drift resampler may play a hair faster or slower, so consecutive ramp
-/// values differ by 1 within interpolation tolerance.
+/// values differ by one step within interpolation tolerance.
 fn close(a: f32, b: f32) -> bool {
-    (a - b).abs() < 0.01
+    (a - b).abs() < 0.01 * STEP
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool) {
@@ -208,7 +212,7 @@ fn f1_f2_stereo_pair_receives_left_and_right_without_gaps() {
 
     let left = audible(&backend.written(&id("left")));
     let right = audible(&backend.written(&id("right")));
-    // Left device plays (x, x) for x = 1, 2, 3, ...; right device (-x, -x).
+    // Left device plays (x, x) for x = 1, 2, 3, ... steps; right device (-x, -x).
     for (i, pair) in left.windows(2).enumerate() {
         let x = pair[0].left;
         assert!(x > 0.0, "left device frame {i} not from left channel");
@@ -217,7 +221,7 @@ fn f1_f2_stereo_pair_receives_left_and_right_without_gaps() {
             "left device frame {i} not mono-left"
         );
         assert!(
-            close(pair[1].left, x + 1.0),
+            close(pair[1].left, x + STEP),
             "left device gap at {i}: {pair:?}"
         );
     }
@@ -229,7 +233,7 @@ fn f1_f2_stereo_pair_receives_left_and_right_without_gaps() {
             "right device frame {i} not mono-right"
         );
         assert!(
-            close(pair[1].right, x - 1.0),
+            close(pair[1].right, x - STEP),
             "right device gap at {i}: {pair:?}"
         );
     }
@@ -241,7 +245,7 @@ fn assert_continuous(frames: &[Frame], sign: f32) {
         let x = pair[0].left;
         assert!(x * sign > 0.0, "frame {i} from the wrong channel");
         assert!(close(pair[0].right, x), "frame {i} not mono");
-        assert!(close(pair[1].left, x + sign), "gap at {i}: {pair:?}");
+        assert!(close(pair[1].left, x + sign * STEP), "gap at {i}: {pair:?}");
     }
 }
 

@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use stereo_bt_core::{ChannelMode, Delay, DeviceId, Volume};
+use stereo_bt_core::{BassCut, ChannelMode, Delay, DeviceId, VirtualBass, Volume};
 use stereo_bt_engine::{
     CalibrationReport, CalibrationRequest, CalibrationState, Engine, EngineConfig, EngineStatus,
 };
@@ -291,6 +291,33 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         let clamped = u8::try_from(percent.clamp(0, 100)).unwrap_or(100);
         let volume = Volume::from_percent(clamped).unwrap_or(Volume::FULL);
         self.edit(id, |d| d.volume = volume);
+    }
+
+    /// Sets the bass cut (F15): below the lowest cutoff it is off, above the
+    /// highest it is clamped.
+    pub(crate) fn set_bass_cut(&mut self, id: &DeviceId, hz: i64) {
+        let cut = if hz < i64::from(BassCut::MIN_HZ) {
+            BassCut::OFF
+        } else {
+            let clamped = u16::try_from(hz.min(i64::from(BassCut::MAX_HZ))).unwrap_or(0);
+            BassCut::from_hz(clamped).unwrap_or(BassCut::OFF)
+        };
+        self.edit(id, |d| d.bass_cut = cut);
+    }
+
+    /// Sets the virtual bass amount, clamped to 0..=100 % (F15).
+    pub(crate) fn set_virtual_bass(&mut self, id: &DeviceId, percent: i64) {
+        let clamped = u8::try_from(percent.clamp(0, 100)).unwrap_or(0);
+        let amount = VirtualBass::from_percent(clamped).unwrap_or(VirtualBass::OFF);
+        self.edit(id, |d| d.virtual_bass = amount);
+    }
+
+    /// Sets the device's own volume while following the system volume,
+    /// clamped to 0..=100 % (F15).
+    pub(crate) fn set_max_volume(&mut self, id: &DeviceId, percent: i64) {
+        let clamped = u8::try_from(percent.clamp(0, 100)).unwrap_or(100);
+        let volume = Volume::from_percent(clamped).unwrap_or(Volume::FULL);
+        self.edit(id, |d| d.max_volume = volume);
     }
 
     /// Periodic work: refresh status, learn new devices, push pending
@@ -1230,6 +1257,29 @@ mod tests {
         c.measurement_close();
 
         assert_eq!(c.view().measurement, None);
+    }
+
+    #[test]
+    fn f15_bass_cut_below_the_range_is_off_and_above_is_clamped() {
+        let (mut c, _, _) = controller();
+
+        c.set_bass_cut(&id("B"), 150);
+        assert_eq!(c.view().rows[1].bass_cut_hz, 150);
+        c.set_bass_cut(&id("B"), 30);
+        assert_eq!(c.view().rows[1].bass_cut_hz, 0);
+        c.set_bass_cut(&id("B"), 900);
+        assert_eq!(c.view().rows[1].bass_cut_hz, 300);
+    }
+
+    #[test]
+    fn f15_virtual_bass_and_max_volume_are_clamped() {
+        let (mut c, _, _) = controller();
+
+        c.set_virtual_bass(&id("B"), 150);
+        c.set_max_volume(&id("B"), -5);
+
+        assert_eq!(c.view().rows[1].virtual_bass_percent, 100);
+        assert_eq!(c.view().rows[1].max_volume_percent, 0);
     }
 
     #[test]

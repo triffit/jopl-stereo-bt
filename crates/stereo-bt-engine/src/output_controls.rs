@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
-use stereo_bt_core::{ChannelMode, Delay, Volume};
+use stereo_bt_core::{BassCut, ChannelMode, Delay, VirtualBass, Volume};
 
 use crate::state_cell::StateCell;
 use crate::{OutputConfig, StreamState};
@@ -14,6 +14,8 @@ pub(crate) struct OutputControls {
     delay_millis: AtomicU16,
     volume_percent: AtomicU8,
     channel_mode: AtomicU8,
+    bass_cut_hz: AtomicU16,
+    virtual_bass_percent: AtomicU8,
     state: StateCell,
     underruns: AtomicU64,
     trims: AtomicU64,
@@ -33,6 +35,8 @@ impl OutputControls {
             delay_millis: AtomicU16::new(config.delay.as_millis()),
             volume_percent: AtomicU8::new(config.volume.as_percent()),
             channel_mode: AtomicU8::new(mode_to_u8(config.channel_mode)),
+            bass_cut_hz: AtomicU16::new(config.bass_cut.as_hz()),
+            virtual_bass_percent: AtomicU8::new(config.virtual_bass.as_percent()),
             state: StateCell::new(),
             underruns: AtomicU64::new(0),
             trims: AtomicU64::new(0),
@@ -69,6 +73,25 @@ impl OutputControls {
 
     pub(crate) fn set_channel_mode(&self, mode: ChannelMode) {
         self.channel_mode.store(mode_to_u8(mode), Ordering::Relaxed);
+    }
+
+    pub(crate) fn bass_cut(&self) -> BassCut {
+        // Only validated values are ever stored.
+        BassCut::from_hz(self.bass_cut_hz.load(Ordering::Relaxed)).unwrap_or(BassCut::OFF)
+    }
+
+    pub(crate) fn set_bass_cut(&self, cut: BassCut) {
+        self.bass_cut_hz.store(cut.as_hz(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn virtual_bass(&self) -> VirtualBass {
+        VirtualBass::from_percent(self.virtual_bass_percent.load(Ordering::Relaxed))
+            .unwrap_or(VirtualBass::OFF)
+    }
+
+    pub(crate) fn set_virtual_bass(&self, amount: VirtualBass) {
+        self.virtual_bass_percent
+            .store(amount.as_percent(), Ordering::Relaxed);
     }
 
     pub(crate) fn state(&self) -> StreamState {
@@ -188,5 +211,16 @@ mod tests {
 
         assert_eq!(c.delay().as_millis(), 123);
         assert_eq!(c.volume().as_percent(), 42);
+    }
+
+    #[test]
+    fn f15_bass_settings_round_trip() {
+        let c = controls();
+        assert_eq!(c.bass_cut(), BassCut::OFF);
+        c.set_bass_cut(BassCut::from_hz(150).unwrap());
+        c.set_virtual_bass(VirtualBass::from_percent(60).unwrap());
+
+        assert_eq!(c.bass_cut().hz(), Some(150));
+        assert_eq!(c.virtual_bass().as_percent(), 60);
     }
 }

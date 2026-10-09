@@ -30,8 +30,9 @@ fn f3_delay_of_10_ms_shifts_impulse_by_480_frames_at_48_khz() {
 #[test]
 fn f3_zero_delay_passes_audio_through_unchanged() {
     let mut chain = OutputChain::new(rate_48k());
+    // Within full scale, so the output limiter leaves it alone.
     let input: Vec<Frame> = (0..64u8)
-        .map(|i| Frame::new(f32::from(i), -f32::from(i)))
+        .map(|i| Frame::new(f32::from(i) / 64.0, -f32::from(i) / 64.0))
         .collect();
     let mut frames = input.clone();
 

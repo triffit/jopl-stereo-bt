@@ -107,6 +107,18 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   overhead (same device native vs. through the pipeline), then the best default and delays.
 - Manual check: `cargo run --release -p stereo-bt-engine --example calibrate [follow]`.
 
+## Sound shaping (F15)
+
+- `OutputChain`: delay → channel mode → `BassShaper` (bass cut: 2 × Butterworth biquad
+  high-pass per channel; virtual bass: mono bass low-pass → full-wave rectifier → band-pass
+  split..4× split, added to both channels) → gain → `Limiter` (instant attack, 150 ms release,
+  ceiling exactly 1.0). None of them adds latency, so sound settings never affect sync.
+- Off is bit-exact pass-through, and the limiter leaves anything within full scale untouched:
+  tests that use sample values as frame markers must keep them ≤ 1.0.
+- Speaker volume limit: `OutputConfig::max_volume` is the Windows volume
+  `Supervisor::reconcile_volumes` sets on a target while following (default 100 %), journaled
+  like before and updated live.
+
 ## Sync model
 
 - Every output keeps its queue at the same cushion (40 ms, `tuning.rs`); priming aligns to

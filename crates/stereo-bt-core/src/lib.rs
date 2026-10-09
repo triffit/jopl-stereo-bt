@@ -7,6 +7,9 @@
 #![forbid(unsafe_code)]
 
 mod auto_calibration;
+mod bass_cut;
+mod bass_shaper;
+mod biquad;
 mod channel_mode;
 mod click;
 mod delay;
@@ -18,6 +21,7 @@ mod drift_control;
 mod drift_resampler;
 mod error;
 mod frame;
+mod limiter;
 mod muted_app;
 mod output_chain;
 pub mod pcm;
@@ -31,6 +35,8 @@ pub use auto_calibration::{
     Arrival, CalibrationOutcome, DeviceLatency, align_to_slowest, find_arrival, plan_first_round,
     plan_second_round,
 };
+pub use bass_cut::{BassCut, VirtualBass};
+pub use bass_shaper::BassShaper;
 pub use channel_mode::ChannelMode;
 pub use click::ClickGenerator;
 pub use delay::Delay;
@@ -42,6 +48,7 @@ pub use drift_control::DriftControl;
 pub use drift_resampler::DriftResampler;
 pub use error::Error;
 pub use frame::Frame;
+pub use limiter::Limiter;
 pub use muted_app::MutedApp;
 pub use output_chain::OutputChain;
 pub use playout::{Playout, PlayoutPlan};
