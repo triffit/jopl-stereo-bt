@@ -13,3 +13,5 @@ desktop.ini
 
 # Local Claude Code settings
 .claude/settings.local.json
+# Personal notes, not part of the project
+NOTE-FOR-JOPL.md

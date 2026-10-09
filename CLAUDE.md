@@ -122,6 +122,10 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 
 ## WASAPI notes
 
+- Known WASAPI codes get a user explanation in `stereo-bt-wasapi/src/error.rs` (`explain`).
+  `0x8889000F` with several Bluetooth devices on Intel laptops is the Intel SST Bluetooth
+  audio offload (one stream only); fix documented in `README.md`.
+
 - Every thread using WASAPI holds a `ComGuard` (MTA). GUI threads are STA → use a
   dedicated audio thread.
 - Loopback delivers no packets while nothing plays; `LoopbackCapture::read` returns an

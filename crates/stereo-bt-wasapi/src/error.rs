@@ -46,8 +46,10 @@ fn explain(code: i32) -> Option<&'static str> {
         // AUDCLNT_E_ENDPOINT_CREATE_FAILED
         0x8889_000F => {
             "Windows could not open this device. A Bluetooth adapter often plays to only one \
-             device at a time: turn off another Bluetooth audio device, or connect this one \
-             with a USB Bluetooth audio transmitter or a cable."
+             device at a time. On Intel laptops, disable \"Intel Smart Sound Technology for \
+             Bluetooth Audio\" in Device Manager and reconnect the devices. Otherwise turn off \
+             another Bluetooth audio device, or connect this one with a USB Bluetooth audio \
+             transmitter or a cable."
         }
         // AUDCLNT_E_SERVICE_NOT_RUNNING
         0x8889_0010 => "The Windows Audio service is not running.",
@@ -93,6 +95,7 @@ mod tests {
 
         assert!(text.starts_with("Windows could not open this device."));
         assert!(text.contains("only one device at a time"));
+        assert!(text.contains("Intel Smart Sound Technology for Bluetooth Audio"));
         assert!(text.ends_with("(0x8889000F)"));
     }
 
