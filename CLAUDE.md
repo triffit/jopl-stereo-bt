@@ -44,8 +44,8 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   encodes it with `src/ico.rs` into `OUT_DIR/app.ico` and embeds it via `winresource`.
 - Window chrome: `ui::select_backend` uses Slint's `unstable-winit-030` hook (Slint pinned
   `~1.18` because of it) for dark mode and the Mica backdrop. `Theme.window` is transparent
-  so Mica shows everywhere, like Windows Settings; the title bar follows the user's Windows
-  setting. `Theme.accent` is the user's Windows accent (`accent.rs`, WinRT `UISettings`
+  so Mica shows everywhere, like Windows Settings; the title bar is a fixed dark #202020
+  (never the accent colour, even with accent title bars on in Windows). `Theme.accent` is the user's Windows accent (`accent.rs`, WinRT `UISettings`
   AccentLight2), set from Rust at start-up. No installer: the exe is portable.
 
 ## Slint notes

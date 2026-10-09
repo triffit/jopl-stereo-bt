@@ -164,12 +164,14 @@ where
     }
 }
 
-/// Uses the winit backend with a dark title bar and the Windows 11 Mica
-/// backdrop behind the whole window (title bar included), which shows
-/// through the transparent window background, as in Windows Settings.
+/// Uses the winit backend with a fixed dark title bar and the Windows 11
+/// Mica backdrop, which shows through the transparent window background,
+/// as in Windows Settings.
 /// Older Windows versions ignore what they do not support and keep the solid look.
 fn select_backend() -> Result<(), slint::PlatformError> {
-    use slint::winit_030::winit::platform::windows::{BackdropType, WindowAttributesExtWindows};
+    use slint::winit_030::winit::platform::windows::{
+        BackdropType, Color, WindowAttributesExtWindows,
+    };
     use slint::winit_030::winit::window::Theme;
 
     slint::BackendSelector::new()
@@ -177,6 +179,9 @@ fn select_backend() -> Result<(), slint::PlatformError> {
         .with_winit_window_attributes_hook(|attributes| {
             attributes
                 .with_theme(Some(Theme::Dark))
+                // A fixed dark title bar, never the user's accent colour.
+                .with_title_background_color(Some(Color::from_rgb(0x20, 0x20, 0x20)))
+                .with_title_text_color(Color::from_rgb(0xff, 0xff, 0xff))
                 .with_system_backdrop(BackdropType::MainWindow)
                 .with_transparent(true)
         })
