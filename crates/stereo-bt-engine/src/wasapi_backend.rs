@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use stereo_bt_core::{DeviceId, DeviceInfo, Frame, SampleRate, SystemVolume};
+use stereo_bt_core::{DeviceId, DeviceInfo, Frame, MutedApp, SampleRate, SystemVolume};
 use stereo_bt_wasapi::{
     ComGuard, Error, LoopbackCapture, MmcssGuard, RenderStream, STREAM_SAMPLE_RATE, is_muted,
-    list_output_devices, set_default_output, set_muted, system_volume,
+    list_output_devices, muted_apps, set_default_output, set_muted, set_volume_scalar,
+    system_volume, unmute_app,
 };
 
 use crate::{Backend, CaptureStream, Platform, RenderSink};
@@ -120,6 +121,18 @@ impl Platform for WasapiPlatform {
 
     fn system_volume(&self, id: &DeviceId) -> Result<SystemVolume, Error> {
         system_volume(id)
+    }
+
+    fn set_volume(&self, id: &DeviceId, scalar: f32) -> Result<(), Error> {
+        set_volume_scalar(id, scalar)
+    }
+
+    fn muted_apps(&self, id: &DeviceId) -> Result<Vec<MutedApp>, Error> {
+        muted_apps(id)
+    }
+
+    fn unmute_app(&self, id: &DeviceId, pid: u32) -> Result<(), Error> {
+        unmute_app(id, pid)
     }
 
     fn set_default_output(&self, id: &DeviceId) -> Result<(), Error> {

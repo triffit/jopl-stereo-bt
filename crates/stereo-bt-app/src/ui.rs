@@ -67,6 +67,15 @@ where
     window.on_assistant_restart(bind.action(Controller::assistant_restart_step));
     window.on_assistant_apply(bind.action(Controller::assistant_apply));
     window.on_assistant_close(bind.action(Controller::assistant_close));
+    window.on_unmute_app({
+        let bind = bind.clone();
+        move |pid| {
+            if let Ok(pid) = u32::try_from(pid) {
+                bind.controller.borrow_mut().unmute_app(pid);
+                bind.refresh();
+            }
+        }
+    });
     window.on_follow_system_volume_changed({
         let bind = bind.clone();
         move |follow| {
@@ -233,6 +242,13 @@ fn apply_view(window: &MainWindow, rows: &VecModel<generated::DeviceRow>, view: 
     window.set_status_line(view.status_line.as_str().into());
     window.set_follow_system_volume(view.follow_system_volume);
     apply_assistant(window, view.assistant.as_ref());
+    match &view.muted_app {
+        Some((text, pid)) => {
+            window.set_muted_app_text(text.as_str().into());
+            window.set_muted_app_pid(i32::try_from(*pid).unwrap_or(0));
+        }
+        None => window.set_muted_app_text(SharedString::new()),
+    }
     window.set_system_volume_text(
         view.system_volume_percent
             .map(|percent| format!("{percent} %"))

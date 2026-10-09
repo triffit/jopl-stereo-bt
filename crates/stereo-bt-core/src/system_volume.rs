@@ -45,6 +45,12 @@ impl SystemVolume {
         percent
     }
 
+    /// The slider position, `0.0..=1.0`.
+    #[must_use]
+    pub const fn scalar(self) -> f32 {
+        self.scalar
+    }
+
     /// Whether the device is muted.
     #[must_use]
     pub const fn is_muted(self) -> bool {

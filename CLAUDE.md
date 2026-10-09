@@ -10,9 +10,9 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - `crates/stereo-bt-wasapi` — thin adapter over the `wasapi` crate: `ComGuard`,
   `list_output_devices`, `default_output_id`, `LoopbackCapture`, `RenderStream`,
   `DeviceWatcher`, plus `is_muted`/`set_muted`/`system_volume`, `set_default_output` and
-  `MmcssGuard`. The **only** `unsafe` in the workspace lives in `endpoint_volume.rs`,
-  `mmcss.rs` and `default_device.rs` (module-level `allow`, every block has a `// SAFETY:`
-  comment). `default_device.rs` declares the undocumented `IPolicyConfig` COM interface
+  `MmcssGuard`, `muted_apps`/`unmute_app`. The **only** `unsafe` in the workspace lives in
+  `endpoint_volume.rs`, `app_sessions.rs`, `mmcss.rs` and `default_device.rs` (module-level
+  `allow`, every block has a `// SAFETY:` comment). `default_device.rs` declares the undocumented `IPolicyConfig` COM interface
   (all 12 methods, vtable order matters) via `windows_core::interface`. Workspace lint is `unsafe_code = "deny"`; core and engine
   `#![forbid(unsafe_code)]`.
   All streams 48 kHz f32 stereo, shared mode with Windows autoconvert.
@@ -28,8 +28,8 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   a channel) so others keep playing. `Supervisor::maintain(now)` (engine loop, every 100 ms)
   retries failed outputs/capture after `RETRY_DELAY` (3 s); errors are shown per device. Behind
   `Platform` + `MuteJournal` traits. `Engine` runs it on its own thread (commands with
-  replies, device events debounced 300 ms, status snapshot). Mutes are journaled *before*
-  muting and restored on stop, drop and next start (`FileMuteJournal`).
+  replies, device events debounced 300 ms, status snapshot). Mutes and volume changes are journaled *before* being made and restored on stop, drop and next
+  start (`FileRestoreJournal`).
 - `crates/stereo-bt-app` — binary `jopl-stereo-bt` (Slint 1.18, `fluent-dark` style via
   `build.rs`). Logic in `controller.rs` (behind `EngineControl` + `SettingsStore` traits,
   fully unit-tested), pure `view_model.rs`, persisted `settings.rs` (TOML in
@@ -65,6 +65,13 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
   `SystemVolume` every 100 ms and sets `Session::set_master_gain` (dB → amplitude, mute → 0;
   our own mute of the source is ignored). Loopback is pre-volume, so this is the only way the
   followers track it. `OutputChain` ramps every gain change over one block (no clicks).
+- While streaming and following, target devices' Windows volume is raised to 100 %
+  (`Supervisor::reconcile_volumes`) so the system volume is the single control; originals are
+  journaled first (`RestoreJournal`: `mute-journal.txt` + `volume-journal.txt` in the data
+  folder) and restored on stop/quit/next start, retried for disconnected devices.
+- Muted-app warning: every second `Supervisor::maintain` lists apps that are *playing* on the
+  default device but muted for it in the Windows volume mixer (their audio reaches no device,
+  since loopback is post-session-mute); the UI offers Unmute.
 - "Make default" on a card → `Engine::make_default` → `Supervisor::make_default`
   (`IPolicyConfig::SetDefaultEndpoint` for console + multimedia roles), then reconcile.
 

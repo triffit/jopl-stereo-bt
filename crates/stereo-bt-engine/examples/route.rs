@@ -18,7 +18,7 @@ use std::time::Duration;
 #[cfg(windows)]
 fn main() -> Result<(), Box<dyn Error>> {
     use stereo_bt_core::{ChannelMode, Delay, Volume};
-    use stereo_bt_engine::{Engine, EngineConfig, FileMuteJournal, OutputConfig};
+    use stereo_bt_engine::{Engine, EngineConfig, FileRestoreJournal, OutputConfig};
     use stereo_bt_wasapi::{ComGuard, list_output_devices};
 
     let devices = {
@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         config.outputs.push(output);
     }
 
-    let journal = FileMuteJournal::new(std::env::temp_dir().join("stereo-bt-route-mutes.txt"));
+    let journal = FileRestoreJournal::in_dir(std::env::temp_dir().join("stereo-bt-route"));
     let engine = Engine::spawn(journal)?;
     engine.start(config)?;
     let name = |id: &stereo_bt_core::DeviceId| {

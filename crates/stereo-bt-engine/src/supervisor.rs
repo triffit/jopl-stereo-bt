@@ -1,12 +1,19 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use stereo_bt_core::{DeviceId, DeviceInfo, SystemVolume};
+use stereo_bt_core::{DeviceId, DeviceInfo, MutedApp, SystemVolume};
 
 use crate::click_track::ClickTrack;
 use crate::{
-    Backend, EngineConfig, MuteJournal, OutputConfig, OutputStatus, Platform, Session, StreamState,
+    Backend, EngineConfig, OutputConfig, OutputStatus, Platform, RestoreJournal, Session,
+    StreamState,
 };
+
+/// How often the default device's volume mixer is checked for muted apps.
+const MUTED_APP_CHECK: Duration = Duration::from_secs(1);
+
+/// Volumes at or above this slider position count as full.
+const FULL_VOLUME: f32 = 0.999;
 
 /// Time between clicks of the assisted-sync click track.
 pub(crate) const CLICK_PERIOD_MILLIS: u32 = 1_000;
@@ -53,6 +60,9 @@ pub struct EngineStatus {
     pub click_times: Vec<Instant>,
     /// The only audible device while assisted sync isolates one.
     pub isolated: Option<DeviceId>,
+    /// Apps playing on the default device while muted for it in the Windows
+    /// volume mixer: their audio reaches no device at all.
+    pub muted_apps: Vec<MutedApp>,
 }
 
 struct ActiveSession<B: Backend> {
@@ -84,22 +94,26 @@ impl<B: Backend> ActiveSession<B> {
 /// device never disturbs the others; only a new source restarts everything.
 /// [`Supervisor::maintain`] retries failed streams. Single-threaded: owned by
 /// the engine thread.
-pub struct Supervisor<P: Platform, J: MuteJournal> {
+pub struct Supervisor<P: Platform, J: RestoreJournal> {
     platform: P,
     journal: J,
     config: EngineConfig,
     running: bool,
     active: Option<ActiveSession<P::Backend>>,
     muted_by_us: Vec<DeviceId>,
+    /// Target devices we raised to full volume, with their original volume.
+    boosted: Vec<(DeviceId, f32)>,
     session_starts: u64,
     devices: Vec<DeviceInfo>,
     system_volume: Option<SystemVolume>,
     click_wanted: bool,
     click_track: Option<ClickTrack>,
     isolated: Option<DeviceId>,
+    muted_apps: Vec<MutedApp>,
+    muted_apps_checked: Option<Instant>,
 }
 
-impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
+impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
     /// Creates a stopped supervisor and restores any mutes a previous run
     /// left behind (e.g. after a crash).
     ///
@@ -107,7 +121,8 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
     ///
     /// Returns [`SupervisorError`] when the journal cannot be read.
     pub fn new(platform: P, journal: J) -> Result<Self, SupervisorError> {
-        let muted_by_us = journal.load()?;
+        let muted_by_us = journal.load_mutes()?;
+        let boosted = journal.load_volumes()?;
         let mut supervisor = Self {
             platform,
             journal,
@@ -115,12 +130,15 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             running: false,
             active: None,
             muted_by_us,
+            boosted,
             session_starts: 0,
             devices: Vec::new(),
             system_volume: None,
             click_wanted: false,
             click_track: None,
             isolated: None,
+            muted_apps: Vec::new(),
+            muted_apps_checked: None,
         };
         supervisor.reconcile()?;
         Ok(supervisor)
@@ -187,6 +205,37 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
         self.reconcile()
     }
 
+    /// Unmutes process `pid` on the default device in the volume mixer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SupervisorError`] when the device cannot be changed.
+    pub fn unmute_app(&mut self, pid: u32) -> Result<(), SupervisorError> {
+        if let Some(default) = self.default_device() {
+            self.platform
+                .unmute_app(&default, pid)
+                .map_err(platform_error)?;
+        }
+        self.refresh_muted_apps();
+        Ok(())
+    }
+
+    fn default_device(&self) -> Option<DeviceId> {
+        self.devices
+            .iter()
+            .find(|d| d.is_default)
+            .map(|d| d.id.clone())
+    }
+
+    /// Re-reads which apps are muted on the default device (also while stopped).
+    fn refresh_muted_apps(&mut self) {
+        self.muted_apps = self
+            .default_device()
+            // A failed query (e.g. the device is switching) shows no warning.
+            .and_then(|id| self.platform.muted_apps(&id).ok())
+            .unwrap_or_default();
+    }
+
     /// Makes `id` the Windows default device (the new audio source) and
     /// switches streaming over to it.
     ///
@@ -220,6 +269,13 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
     /// Returns [`SupervisorError`] when devices cannot be queried or controlled.
     pub fn maintain(&mut self, now: Instant) -> Result<(), SupervisorError> {
         self.follow_system_volume();
+        if self
+            .muted_apps_checked
+            .is_none_or(|at| now.duration_since(at) >= MUTED_APP_CHECK)
+        {
+            self.muted_apps_checked = Some(now);
+            self.refresh_muted_apps();
+        }
         let Some(active) = self.active.as_mut() else {
             return Ok(());
         };
@@ -305,6 +361,7 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
                 .map(ClickTrack::clicks)
                 .unwrap_or_default(),
             isolated: self.isolated.clone(),
+            muted_apps: self.muted_apps.clone(),
         }
     }
 
@@ -337,7 +394,47 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
             active.session.isolate(self.isolated.as_ref());
         }
         self.reconcile_click_track()?;
+        self.reconcile_volumes()?;
         query.map(|_| ())
+    }
+
+    /// While streaming and following the system volume, every target device
+    /// plays at full Windows volume, so the system volume (applied by us) is
+    /// the one control for all devices. Original volumes are journaled first
+    /// and restored when no longer needed; a device that cannot be restored
+    /// right now (disconnected) is retried on the next reconcile.
+    fn reconcile_volumes(&mut self) -> Result<(), SupervisorError> {
+        let wanted: Vec<DeviceId> = match &self.active {
+            Some(active) if self.running && self.config.follow_system_volume => {
+                active.session.output_ids()
+            }
+            _ => Vec::new(),
+        };
+        let before = self.boosted.len();
+        let platform = &self.platform;
+        self.boosted.retain(|(id, original)| {
+            wanted.contains(id) || platform.set_volume(id, *original).is_err()
+        });
+        if self.boosted.len() != before {
+            self.journal.save_volumes(&self.boosted)?;
+        }
+        for id in wanted {
+            if self.boosted.iter().any(|(boosted, _)| boosted == &id) {
+                continue;
+            }
+            // A device that cannot be queried right now is tried again later.
+            let Ok(volume) = self.platform.system_volume(&id) else {
+                continue;
+            };
+            if volume.scalar() >= FULL_VOLUME {
+                continue;
+            }
+            // Record first: a crash between the two steps only causes a harmless restore.
+            self.boosted.push((id.clone(), volume.scalar()));
+            self.journal.save_volumes(&self.boosted)?;
+            self.platform.set_volume(&id, 1.0).map_err(platform_error)?;
+        }
+        Ok(())
     }
 
     /// Keeps the click track playing on the current source while wanted.
@@ -375,7 +472,7 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
         self.muted_by_us
             .retain(|id| Some(id) == keep || platform.set_muted(id, false).is_err());
         if self.muted_by_us.len() != before {
-            self.journal.save(&self.muted_by_us)?;
+            self.journal.save_mutes(&self.muted_by_us)?;
         }
         Ok(())
     }
@@ -387,7 +484,7 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
         }
         // Record first: a crash between the two steps only causes a harmless unmute.
         self.muted_by_us.push(id.clone());
-        self.journal.save(&self.muted_by_us)?;
+        self.journal.save_mutes(&self.muted_by_us)?;
         self.platform.set_muted(id, true).map_err(platform_error)
     }
 
@@ -438,7 +535,7 @@ impl<P: Platform, J: MuteJournal> Supervisor<P, J> {
     }
 }
 
-impl<P: Platform, J: MuteJournal> Drop for Supervisor<P, J> {
+impl<P: Platform, J: RestoreJournal> Drop for Supervisor<P, J> {
     fn drop(&mut self) {
         self.running = false;
         // Best effort: whatever cannot be restored now stays in the journal
@@ -492,8 +589,11 @@ mod tests {
         journal: &[&str],
     ) -> (TestSupervisor, Arc<Mutex<Vec<DeviceId>>>) {
         let journal = Arc::new(Mutex::new(journal.iter().map(|raw| id(raw)).collect()));
-        let supervisor =
-            Supervisor::new(FakePlatform::new(world), FakeJournal(Arc::clone(&journal))).unwrap();
+        let supervisor = Supervisor::new(
+            FakePlatform::new(world),
+            FakeJournal(Arc::clone(&journal), Arc::default()),
+        )
+        .unwrap();
         (supervisor, journal)
     }
 
@@ -600,6 +700,158 @@ mod tests {
         assert!(!s.status().click_track);
         assert_eq!(s.status().isolated, None);
         assert!(lock(&w).muted.is_empty());
+    }
+
+    fn supervisor_with_volumes(
+        world: &SharedWorld,
+        volumes: &[(&str, f32)],
+    ) -> (TestSupervisor, crate::test_fakes::VolumeRecord) {
+        let record: crate::test_fakes::VolumeRecord = Arc::new(Mutex::new(
+            volumes.iter().map(|&(raw, v)| (id(raw), v)).collect(),
+        ));
+        let supervisor = Supervisor::new(
+            FakePlatform::new(world),
+            FakeJournal(Arc::default(), Arc::clone(&record)),
+        )
+        .unwrap();
+        (supervisor, record)
+    }
+
+    fn scalar(w: &SharedWorld, raw: &str) -> f32 {
+        lock(w).volumes.get(&id(raw)).map_or(1.0, |v| v.scalar())
+    }
+
+    #[test]
+    fn following_raises_target_volumes_to_full_and_stop_restores_them() {
+        let w = world("A", &["A", "B", "C"]);
+        lock(&w)
+            .volumes
+            .insert(id("B"), SystemVolume::new(-35.0, 0.1, false));
+        lock(&w)
+            .volumes
+            .insert(id("A"), SystemVolume::new(-3.0, 0.85, false));
+        let (mut s, record) = supervisor_with_volumes(&w, &[]);
+
+        s.start(config(&["B", "C"], true)).unwrap();
+
+        assert!((scalar(&w, "B") - 1.0).abs() < f32::EPSILON);
+        assert!(
+            (scalar(&w, "A") - 0.85).abs() < f32::EPSILON,
+            "source untouched"
+        );
+        assert_eq!(*lock(&record), vec![(id("B"), 0.1)], "C was already full");
+
+        s.stop().unwrap();
+
+        assert!((scalar(&w, "B") - 0.1).abs() < f32::EPSILON);
+        assert!(lock(&record).is_empty());
+    }
+
+    #[test]
+    fn not_following_leaves_device_volumes_alone() {
+        let w = world("A", &["A", "B"]);
+        lock(&w)
+            .volumes
+            .insert(id("B"), SystemVolume::new(-35.0, 0.1, false));
+        let (mut s, _) = supervisor_with_volumes(&w, &[]);
+        let mut cfg = config(&["B"], true);
+        cfg.follow_system_volume = false;
+
+        s.start(cfg).unwrap();
+
+        assert!((scalar(&w, "B") - 0.1).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn switching_following_off_restores_volumes() {
+        let w = world("A", &["A", "B"]);
+        lock(&w)
+            .volumes
+            .insert(id("B"), SystemVolume::new(-35.0, 0.1, false));
+        let (mut s, _) = supervisor_with_volumes(&w, &[]);
+        s.start(config(&["B"], true)).unwrap();
+        let mut cfg = config(&["B"], true);
+        cfg.follow_system_volume = false;
+
+        s.update(cfg).unwrap();
+
+        assert!((scalar(&w, "B") - 0.1).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn startup_restores_volumes_left_by_a_crash() {
+        let w = world("A", &["A", "B"]);
+
+        let (_s, record) = supervisor_with_volumes(&w, &[("B", 0.44)]);
+
+        assert!((scalar(&w, "B") - 0.44).abs() < f32::EPSILON);
+        assert!(lock(&record).is_empty());
+    }
+
+    #[test]
+    fn volume_of_a_disconnected_device_is_restored_when_it_returns() {
+        let w = world("A", &["A"]);
+        let (mut s, record) = supervisor_with_volumes(&w, &[("B", 0.44)]);
+        assert_eq!(lock(&record).len(), 1);
+
+        lock(&w).active.push(id("B"));
+        s.devices_changed().unwrap();
+
+        assert!((scalar(&w, "B") - 0.44).abs() < f32::EPSILON);
+        assert!(lock(&record).is_empty());
+    }
+
+    fn chrome() -> MutedApp {
+        MutedApp {
+            pid: 42,
+            name: "chrome".into(),
+        }
+    }
+
+    #[test]
+    fn app_muted_on_the_default_device_is_reported_even_while_stopped() {
+        let w = world("A", &["A", "B"]);
+        lock(&w).muted_apps.push((id("A"), chrome()));
+        lock(&w).muted_apps.push((
+            id("B"),
+            MutedApp {
+                pid: 7,
+                name: "other".into(),
+            },
+        ));
+        let (mut s, _) = supervisor(&w, &[]);
+
+        s.maintain(Instant::now()).unwrap();
+
+        assert_eq!(s.status().muted_apps, vec![chrome()]);
+    }
+
+    #[test]
+    fn unmuting_an_app_clears_the_warning() {
+        let w = world("A", &["A", "B"]);
+        lock(&w).muted_apps.push((id("A"), chrome()));
+        let (mut s, _) = supervisor(&w, &[]);
+        s.maintain(Instant::now()).unwrap();
+
+        s.unmute_app(42).unwrap();
+
+        assert!(lock(&w).muted_apps.is_empty());
+        assert!(s.status().muted_apps.is_empty());
+    }
+
+    #[test]
+    fn muted_apps_are_checked_about_once_a_second() {
+        let w = world("A", &["A", "B"]);
+        let (mut s, _) = supervisor(&w, &[]);
+        let now = Instant::now();
+        s.maintain(now).unwrap();
+
+        lock(&w).muted_apps.push((id("A"), chrome()));
+        s.maintain(now + Duration::from_millis(500)).unwrap();
+        assert!(s.status().muted_apps.is_empty());
+        s.maintain(now + MUTED_APP_CHECK).unwrap();
+
+        assert_eq!(s.status().muted_apps, vec![chrome()]);
     }
 
     #[test]

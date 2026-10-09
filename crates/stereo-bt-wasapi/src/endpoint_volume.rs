@@ -73,6 +73,22 @@ pub fn system_volume(id: &DeviceId) -> Result<SystemVolume, Error> {
     ))
 }
 
+/// Sets the Windows volume slider of endpoint `id` (`0.0..=1.0`).
+///
+/// Requires a [`crate::ComGuard`] on the calling thread.
+///
+/// # Errors
+///
+/// Returns [`Error`] when the device does not exist or cannot be changed.
+pub fn set_volume_scalar(id: &DeviceId, scalar: f32) -> Result<(), Error> {
+    let volume = endpoint_volume(id)?;
+    // SAFETY: `volume` is a valid interface pointer; a null event-context
+    // GUID pointer is explicitly allowed by the API.
+    unsafe { volume.SetMasterVolumeLevelScalar(scalar.clamp(0.0, 1.0), std::ptr::null()) }
+        .map_err(WasapiError::from)?;
+    Ok(())
+}
+
 fn endpoint_volume(id: &DeviceId) -> Result<IAudioEndpointVolume, Error> {
     let wide_id: Vec<u16> = id.as_str().encode_utf16().chain([0]).collect();
     // SAFETY: standard COM instantiation; without COM initialised on this

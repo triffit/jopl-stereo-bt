@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use stereo_bt_core::Frame;
 use stereo_bt_wasapi::{
     ComGuard, DeviceWatcher, LoopbackCapture, MmcssGuard, RenderStream, default_output_id,
-    is_muted, list_output_devices, set_default_output, set_muted, system_volume,
+    is_muted, list_output_devices, muted_apps, set_default_output, set_muted, system_volume,
 };
 
 #[test]
@@ -130,4 +130,15 @@ fn current_default_device_can_be_set_as_default_again() {
     set_default_output(&default).unwrap();
 
     assert_eq!(default_output_id().unwrap(), Some(default));
+}
+
+#[test]
+#[ignore = "needs an active audio output device"]
+fn muted_apps_of_default_device_can_be_listed() {
+    let _com = ComGuard::init_mta().unwrap();
+    let default = default_output_id().unwrap().unwrap();
+
+    let muted = muted_apps(&default).unwrap();
+
+    assert!(muted.iter().all(|app| app.pid != 0 && !app.name.is_empty()));
 }

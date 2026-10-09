@@ -33,9 +33,10 @@ and do not compensate for the different latency of each Bluetooth device.
 | F7 | Tray mode | Keeps streaming when the window is closed; tray menu for start/stop/quit. |
 | F8 | Profiles | Remember device set, channel mode, delay and volume per device ID. |
 | F9 | Clock-drift correction | Equal per-output queue cushion plus click-free adaptive resampling (±0.2 %, inaudible) that keeps every queue at the cushion; trimming only as a safety net. WaveSync has neither. |
-| F10 | Follow system volume | All selected devices follow the Windows volume and mute of the default device (on by default); per-device Vol stays as a relative trim. |
+| F10 | Follow system volume | All selected devices follow the Windows volume and mute of the default device (on by default); their own Windows volume is set to 100 % while streaming (restored afterwards); per-device Vol stays as a relative trim. |
 | F11 | Make default | Switch the Windows default output device from a device card. |
 | F12 | Assisted sync | Click track played into the default device (so it reaches every device through its real path); tap along per isolated device, get suggested delays, then fine-tune by ear with all devices clicking. |
+| F13 | Muted-app warning | Warns when an app plays on the default device but is muted for it in the Windows volume mixer (its sound then reaches no device), with an Unmute button. |
 
 ## Later (v2+)
 

@@ -8,7 +8,7 @@ use std::time::Duration;
 use stereo_bt_core::{DeviceEvent, DeviceId};
 
 use crate::engine_loop::{self, Command, Shared};
-use crate::{EngineConfig, EngineStatus, MuteJournal, Platform, Supervisor, SupervisorError};
+use crate::{EngineConfig, EngineStatus, Platform, RestoreJournal, Supervisor, SupervisorError};
 
 /// What the engine-thread setup returns: values to keep alive for the
 /// thread's lifetime (dropped after the supervisor), and the supervisor.
@@ -54,7 +54,7 @@ impl Engine {
     /// Returns [`EngineError`] when the engine thread or the Windows audio
     /// system cannot be initialised.
     #[cfg(windows)]
-    pub fn spawn(journal: crate::FileMuteJournal) -> Result<Self, EngineError> {
+    pub fn spawn(journal: crate::FileRestoreJournal) -> Result<Self, EngineError> {
         use crate::wasapi_backend::{AudioThreadGuard, WasapiPlatform};
         use stereo_bt_wasapi::DeviceWatcher;
 
@@ -73,7 +73,7 @@ impl Engine {
     pub(crate) fn spawn_with<P, J, F>(setup: F) -> Result<Self, EngineError>
     where
         P: Platform,
-        J: MuteJournal,
+        J: RestoreJournal,
         F: FnOnce(&Sender<DeviceEvent>) -> Setup<P, J> + Send + 'static,
     {
         let (commands, command_rx) = mpsc::channel();
@@ -162,6 +162,15 @@ impl Engine {
         self.request(|reply| Command::Isolate(device, reply))
     }
 
+    /// Unmutes process `pid` on the default device in the Windows volume mixer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] when the device cannot be changed.
+    pub fn unmute_app(&self, pid: u32) -> Result<(), EngineError> {
+        self.request(|reply| Command::UnmuteApp(pid, reply))
+    }
+
     /// The latest status snapshot (refreshed about every 100 ms).
     #[must_use]
     pub fn status(&self) -> EngineStatus {
@@ -226,7 +235,7 @@ mod tests {
     fn engine(world: &SharedWorld) -> Engine {
         let world = Arc::clone(world);
         Engine::spawn_with(move |_events| {
-            let journal = FakeJournal(Arc::new(Mutex::new(Vec::new())));
+            let journal = FakeJournal(Arc::new(Mutex::new(Vec::new())), Arc::default());
             let supervisor = Supervisor::new(FakePlatform::new(&world), journal)?;
             Ok((Box::new(()), supervisor))
         })

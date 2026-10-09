@@ -24,6 +24,7 @@ pub(crate) trait EngineControl {
     fn make_default(&self, id: &DeviceId) -> Result<(), String>;
     fn set_click_track(&self, on: bool) -> Result<(), String>;
     fn isolate(&self, device: Option<DeviceId>) -> Result<(), String>;
+    fn unmute_app(&self, pid: u32) -> Result<(), String>;
     fn status(&self) -> EngineStatus;
     fn last_error(&self) -> Option<String>;
 }
@@ -53,6 +54,10 @@ impl EngineControl for Engine {
         Engine::isolate(self, device).map_err(|e| e.to_string())
     }
 
+    fn unmute_app(&self, pid: u32) -> Result<(), String> {
+        Engine::unmute_app(self, pid).map_err(|e| e.to_string())
+    }
+
     fn status(&self) -> EngineStatus {
         Engine::status(self)
     }
@@ -60,6 +65,14 @@ impl EngineControl for Engine {
     fn last_error(&self) -> Option<String> {
         Engine::last_error(self)
     }
+}
+
+/// A friendlier app name: `chrome` becomes `Chrome`.
+fn display_name(executable: &str) -> String {
+    let mut chars = executable.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
 }
 
 /// One line of the assistant's results.
@@ -98,6 +111,8 @@ pub(crate) struct View {
     pub(crate) status_kind: StatusKind,
     pub(crate) error: Option<String>,
     pub(crate) assistant: Option<AssistantView>,
+    /// Warning about an app muted on the default device, with its pid.
+    pub(crate) muted_app: Option<(String, u32)>,
 }
 
 pub(crate) struct Controller<E: EngineControl, S: SettingsStore> {
@@ -258,7 +273,38 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
             status_kind: view_model::status_kind(&self.status),
             error: self.error.clone().or_else(|| self.engine.last_error()),
             assistant: self.assistant.as_ref().map(|a| self.assistant_view(a)),
+            muted_app: self.muted_app_warning(),
         }
+    }
+
+    /// Unmutes the app named in the muted-app warning.
+    pub(crate) fn unmute_app(&mut self, pid: u32) {
+        match self.engine.unmute_app(pid) {
+            Ok(()) => self.error = None,
+            Err(e) => self.error = Some(format!("Could not unmute the app: {e}")),
+        }
+        self.status = self.engine.status();
+    }
+
+    fn muted_app_warning(&self) -> Option<(String, u32)> {
+        let app = self.status.muted_apps.first()?;
+        let device = self
+            .status
+            .devices
+            .iter()
+            .find(|d| d.is_default)
+            .map_or("the default device", |d| d.name.as_str());
+        let others = match self.status.muted_apps.len() {
+            1 => String::new(),
+            n => format!(" (and {} more)", n - 1),
+        };
+        Some((
+            format!(
+                "{}{others} is muted for {device} in the Windows volume mixer, so its sound reaches no device.",
+                display_name(&app.name)
+            ),
+            app.pid,
+        ))
     }
 
     /// Opens the sync assistant: clicks start on the default device, which
@@ -493,6 +539,12 @@ mod tests {
 
         fn isolate(&self, device: Option<DeviceId>) -> Result<(), String> {
             self.0.borrow_mut().isolated.push(device);
+            Ok(())
+        }
+
+        fn unmute_app(&self, pid: u32) -> Result<(), String> {
+            let mut log = self.0.borrow_mut();
+            log.status.muted_apps.retain(|app| app.pid != pid);
             Ok(())
         }
 
@@ -749,6 +801,32 @@ mod tests {
 
         assert!(c.view().assistant.is_none());
         assert!(!engine.0.borrow().click_track);
+    }
+
+    #[test]
+    fn muted_app_on_the_default_device_is_warned_about_and_can_be_unmuted() {
+        let (mut c, engine, _) = controller();
+        engine
+            .0
+            .borrow_mut()
+            .status
+            .muted_apps
+            .push(stereo_bt_core::MutedApp {
+                pid: 42,
+                name: "chrome".into(),
+            });
+        c.tick(Instant::now());
+
+        let (text, pid) = c.view().muted_app.unwrap();
+        assert_eq!(
+            text,
+            "Chrome is muted for A in the Windows volume mixer, so its sound reaches no device."
+        );
+        assert_eq!(pid, 42);
+
+        c.unmute_app(42);
+
+        assert_eq!(c.view().muted_app, None);
     }
 
     #[test]

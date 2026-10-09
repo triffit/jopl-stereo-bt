@@ -7,9 +7,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
-use stereo_bt_core::{DeviceId, DeviceInfo, Frame, SampleRate, SystemVolume};
+use stereo_bt_core::{DeviceId, DeviceInfo, Frame, MutedApp, SampleRate, SystemVolume};
 
-use crate::{Backend, CaptureStream, MuteJournal, Platform, RenderSink};
+use crate::{Backend, CaptureStream, Platform, RenderSink, RestoreJournal};
 
 #[derive(Debug)]
 pub(crate) struct FakeError;
@@ -137,6 +137,8 @@ pub(crate) struct World {
     pub(crate) render_opens: Vec<DeviceId>,
     /// Windows volume per device; full volume when absent.
     pub(crate) volumes: HashMap<DeviceId, SystemVolume>,
+    /// Apps muted in the volume mixer, per device.
+    pub(crate) muted_apps: Vec<(DeviceId, MutedApp)>,
 }
 
 /// A world shared between the test and the platform (possibly on another thread).
@@ -201,6 +203,38 @@ impl Platform for FakePlatform {
         ))
     }
 
+    fn set_volume(&self, id: &DeviceId, scalar: f32) -> Result<(), FakeError> {
+        let mut world = lock(&self.world);
+        if !world.active.contains(id) {
+            return Err(FakeError);
+        }
+        let level_db = if scalar > 0.0 {
+            20.0 * scalar.log10()
+        } else {
+            -96.0
+        };
+        world
+            .volumes
+            .insert(id.clone(), SystemVolume::new(level_db, scalar, false));
+        Ok(())
+    }
+
+    fn muted_apps(&self, id: &DeviceId) -> Result<Vec<MutedApp>, FakeError> {
+        Ok(lock(&self.world)
+            .muted_apps
+            .iter()
+            .filter(|(device, _)| device == id)
+            .map(|(_, app)| app.clone())
+            .collect())
+    }
+
+    fn unmute_app(&self, id: &DeviceId, pid: u32) -> Result<(), FakeError> {
+        lock(&self.world)
+            .muted_apps
+            .retain(|(device, app)| !(device == id && app.pid == pid));
+        Ok(())
+    }
+
     fn set_default_output(&self, id: &DeviceId) -> Result<(), FakeError> {
         let mut world = lock(&self.world);
         if !world.active.contains(id) {
@@ -228,16 +262,31 @@ impl Platform for FakePlatform {
     }
 }
 
-/// In-memory journal, shared with the test.
-pub(crate) struct FakeJournal(pub(crate) Arc<Mutex<Vec<DeviceId>>>);
+/// Recorded original volumes, shared with the test.
+pub(crate) type VolumeRecord = Arc<Mutex<Vec<(DeviceId, f32)>>>;
 
-impl MuteJournal for FakeJournal {
-    fn load(&self) -> io::Result<Vec<DeviceId>> {
+/// In-memory journal (mutes, volumes), shared with the test.
+pub(crate) struct FakeJournal(
+    pub(crate) Arc<Mutex<Vec<DeviceId>>>,
+    pub(crate) VolumeRecord,
+);
+
+impl RestoreJournal for FakeJournal {
+    fn load_mutes(&self) -> io::Result<Vec<DeviceId>> {
         Ok(lock(&self.0).clone())
     }
 
-    fn save(&self, muted: &[DeviceId]) -> io::Result<()> {
+    fn save_mutes(&self, muted: &[DeviceId]) -> io::Result<()> {
         *lock(&self.0) = muted.to_vec();
+        Ok(())
+    }
+
+    fn load_volumes(&self) -> io::Result<Vec<(DeviceId, f32)>> {
+        Ok(lock(&self.1).clone())
+    }
+
+    fn save_volumes(&self, volumes: &[(DeviceId, f32)]) -> io::Result<()> {
+        *lock(&self.1) = volumes.to_vec();
         Ok(())
     }
 }

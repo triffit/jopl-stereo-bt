@@ -24,7 +24,7 @@ mod view_model;
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     use anyhow::Context;
-    use stereo_bt_engine::{Engine, FileMuteJournal};
+    use stereo_bt_engine::{Engine, FileRestoreJournal};
 
     use crate::settings_store::FileSettingsStore;
 
@@ -32,7 +32,7 @@ fn main() -> anyhow::Result<()> {
         .map(|dir| std::path::PathBuf::from(dir).join("JOPL-StereoBT"))
         .context("the APPDATA environment variable is not set")?;
 
-    match Engine::spawn(FileMuteJournal::new(data_dir.join("mute-journal.txt"))) {
+    match Engine::spawn(FileRestoreJournal::in_dir(&data_dir)) {
         Ok(engine) => {
             ui::run_main(
                 engine,

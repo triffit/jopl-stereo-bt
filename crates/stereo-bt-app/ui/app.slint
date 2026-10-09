@@ -334,12 +334,16 @@ export component MainWindow inherits Window {
     in property <string> version;
     in property <bool> follow-system-volume;
     in property <AssistantState> assistant;
+    // Warning about an app muted on the default device; empty when none.
+    in property <string> muted-app-text;
+    in property <int> muted-app-pid;
     in property <[AssistantResult]> assistant-results;
     // Current Windows volume, e.g. "45 %"; empty when not following.
     in property <string> system-volume-text;
 
     callback toggle-running();
     callback follow-system-volume-changed(bool);
+    callback unmute-app(int);
     callback assistant-start();
     callback assistant-tap();
     callback assistant-next();
@@ -476,6 +480,31 @@ export component MainWindow inherits Window {
                     vertical-alignment: center;
                     min-width: 40px;
                     horizontal-alignment: right;
+                }
+            }
+        }
+
+        if root.muted-app-text != "": Rectangle {
+            border-radius: Theme.radius;
+            background: Theme.warning.with-alpha(0.12);
+            border-width: 1px;
+            border-color: Theme.warning;
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 14px;
+                Text {
+                    text: root.muted-app-text;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    OutlineButton {
+                        text: "Unmute";
+                        clicked => { root.unmute-app(root.muted-app-pid); }
+                    }
                 }
             }
         }

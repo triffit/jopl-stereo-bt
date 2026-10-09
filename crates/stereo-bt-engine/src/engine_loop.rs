@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use stereo_bt_core::{DeviceEvent, DeviceId};
 
-use crate::{EngineConfig, EngineStatus, MuteJournal, Platform, Supervisor, SupervisorError};
+use crate::{EngineConfig, EngineStatus, Platform, RestoreJournal, Supervisor, SupervisorError};
 
 /// Device events arrive in bursts (state change, then default change);
 /// wait this long after the last one before reacting, so Windows settles.
@@ -21,6 +21,7 @@ pub(crate) enum Command {
     MakeDefault(DeviceId, Sender<Result<(), SupervisorError>>),
     ClickTrack(bool, Sender<Result<(), SupervisorError>>),
     Isolate(Option<DeviceId>, Sender<Result<(), SupervisorError>>),
+    UnmuteApp(u32, Sender<Result<(), SupervisorError>>),
     Shutdown,
 }
 
@@ -33,7 +34,7 @@ pub(crate) struct Shared {
 }
 
 /// Runs the supervisor until [`Command::Shutdown`] or the command channel closes.
-pub(crate) fn run<P: Platform, J: MuteJournal>(
+pub(crate) fn run<P: Platform, J: RestoreJournal>(
     mut supervisor: Supervisor<P, J>,
     commands: &Receiver<Command>,
     device_events: &Receiver<DeviceEvent>,
@@ -60,6 +61,9 @@ pub(crate) fn run<P: Platform, J: MuteJournal>(
             }
             Ok(Command::Isolate(device, reply)) => {
                 let _ = reply.send(supervisor.isolate(device));
+            }
+            Ok(Command::UnmuteApp(pid, reply)) => {
+                let _ = reply.send(supervisor.unmute_app(pid));
             }
             Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {}
@@ -120,7 +124,7 @@ mod tests {
                 active: vec![id("A"), id("B"), id("C")],
                 ..World::default()
             }));
-            let journal = FakeJournal(Arc::new(Mutex::new(Vec::new())));
+            let journal = FakeJournal(Arc::new(Mutex::new(Vec::new())), Arc::default());
             let supervisor = Supervisor::new(FakePlatform::new(&world), journal).unwrap();
             let (commands, command_rx) = mpsc::channel();
             let (events, event_rx) = mpsc::channel();
