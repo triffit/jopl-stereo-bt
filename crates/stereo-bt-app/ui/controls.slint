@@ -233,6 +233,8 @@ export component ToggleSwitch inherits Rectangle {
 // Button with an optional icon; `primary` uses the accent colour.
 export component CommandButton inherits Rectangle {
     in property <string> text;
+    // Accessible name; defaults to the visible text.
+    in property <string> label: root.text;
     in property <string> glyph;
     in property <bool> primary;
     in property <bool> enabled: true;
@@ -248,7 +250,7 @@ export component CommandButton inherits Rectangle {
     border-color: focus.has-focus ? Theme.text : Theme.control-stroke;
     opacity: root.enabled ? 1 : 0.45;
     accessible-role: button;
-    accessible-label: root.text;
+    accessible-label: root.label;
     accessible-enabled: root.enabled;
     accessible-action-default => {
         if (root.enabled) {

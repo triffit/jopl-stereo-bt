@@ -382,6 +382,8 @@ component DeviceCard inherits Card {
                 }
             }
             if device.battery != "": HorizontalLayout {
+                // Only as wide as needed: the name column takes the rest.
+                horizontal-stretch: 0;
                 spacing: 6px;
                 accessible-role: text;
                 accessible-label: "Battery " + device.battery;
@@ -397,22 +399,27 @@ component DeviceCard inherits Card {
             }
             // A level meter means the device is playing, so it can be pinged.
             if root.level >= 0: VerticalLayout {
+                horizontal-stretch: 0;
                 alignment: center;
-                SubtleButton {
+                CommandButton {
                     text: "Ping";
+                    glyph: "\u{E767}";
                     label: "Ping " + device.name + ": play a short double beep on it";
                     clicked => { root.ping(); }
                 }
             }
             if device.can-make-default: VerticalLayout {
+                horizontal-stretch: 0;
                 alignment: center;
-                SubtleButton {
+                CommandButton {
                     text: "Make default";
+                    glyph: "\u{E734}";
                     label: "Make " + device.name + " the Windows default device";
                     clicked => { root.make-default(); }
                 }
             }
             if device.checked && !device.is-source: VerticalLayout {
+                horizontal-stretch: 0;
                 alignment: center;
                 SubtleButton {
                     glyph: device.collapsed ? "\u{E70D}" : "\u{E70E}";
@@ -421,6 +428,7 @@ component DeviceCard inherits Card {
                 }
             }
             VerticalLayout {
+                horizontal-stretch: 0;
                 alignment: center;
                 ToggleSwitch {
                     text: device.is-source ? "Keep playing" : device.checked ? "On" : "Off";
