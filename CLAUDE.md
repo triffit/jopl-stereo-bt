@@ -54,7 +54,7 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - User interaction replaces a control's value binding; components re-push model values in a
   `changed device => { ... }` handler. Element ids inside `if` blocks are not reachable from
   outside, so such controls live in their own component (`DeviceControls`).
-- Look: Windows 11 Fluent dark (design: `mockups/windows11-2-pages.html`). Navigation rail
+- Look: Windows 11 Fluent dark (design mockups are kept locally in the ignored `mockups/` folder). Navigation rail
   with three pages: **Devices** (every setting per device), **Sync** (timing chart from the
   last mic measurement, Measure with the microphone, Sync by ear) and **Settings** (toggles +
   About). One button "Play on multiple devices" / "Stop playing"; the info bar says
