@@ -1,13 +1,29 @@
 # JOPL-StereoBT
 
 Play Windows system audio on several devices at once (Bluetooth speakers and headphones,
-monitors, built-in speakers), in sync, with per-device delay, channels (stereo, left,
-right, mono) and volume. No virtual audio driver needed.
+monitors, built-in speakers), in sync. Every device gets its own delay, channels (stereo,
+left, right, mono), volume and surround position; small speakers get bass shaping, and the
+whole set a wider stereo image and reverb. No virtual audio driver needed.
+
+<img src="screenshot.png" alt="JOPL-StereoBT: the Devices page playing on two JBL Go speakers (left and right) and a monitor, with per-device channels, position, delay, volume, bass cut and virtual bass, and the Space settings below" width="900">
+
+- **In sync**: measure every device's latency with the microphone (or sync by ear) and let
+  the app set the delays; clock drift between devices is corrected continuously.
+- **Stereo from two speakers**: one speaker plays left, the other right.
+- **Small speakers**: bass cut, virtual bass and a limiter make e.g. a JBL Go sound fuller
+  and cleaner.
+- **Surround from stereo**: devices can play front, center (voices) or rear (ambience).
+- **Space**: stereo width and room reverb.
+- **Handy**: follows the Windows volume, battery levels, level meters, a Ping button to tell
+  identical speakers apart, a tray icon, and the Windows 11 look with your accent colour.
 
 Windows 11, portable: a single `jopl-stereo-bt.exe`, no installer. MIT licence, see
-[LICENSE](LICENSE). Product description: [PRODUCT.md](PRODUCT.md).
+[LICENSE](LICENSE). Product description: [PRODUCT.md](PRODUCT.md). Inspired by
+[WaveSync](https://indalsingh.dev/wavesync).
 
 ## Build
+
+Needs Rust 1.98 or newer.
 
 ```sh
 cargo build --release
@@ -17,25 +33,29 @@ The exe is `target/release/jopl-stereo-bt.exe`.
 
 ## Use
 
-1. **Devices**: switch on the devices to play on and pick channels, delay and volume.
+1. **Devices**: switch on the devices to play on; per device pick channels, position,
+   delay and volume. The ▴/▾ button collapses a card to a one-line summary.
 2. Press **Play on multiple devices**.
-3. **Sync**: measure with the microphone (or sync by ear) to align the devices.
-4. **Small speakers** (e.g. JBL Go), per device on **Devices**:
+3. **Sync**: measure with the microphone (or sync by ear) to align the devices; the page
+   shows when each device plays.
+4. **Small speakers** (e.g. JBL Go), per device:
    - **Bass cut**: removes bass the speaker cannot play, so it sounds louder and cleaner
-     (try 120–180 Hz; lowest position is off).
+     (lowest position is off).
    - **Virtual bass**: adds harmonics above the bass cut, so the cut bass is still heard
      (try 50–100 %). Set the bass cut to where the speaker stops playing bass (JBL Go:
      about 180 Hz) first: the harmonics are placed above it.
    - A limiter always prevents clipping.
-5. **Surround** (Position on each device card): **Front** plays stereo as usual,
-   **Center** plays the middle (voices), **Rear** plays only the ambience, slightly later,
-   so music and films get a surround feel, e.g. the laptop in front and two JBLs behind
-   you on Rear (one Left, one Right). The ▴/▾ button collapses a card to its header.
-6. **Sound → Space** (Devices page): **Stereo width** above 100 % makes a speaker pair
-   (one on Left, one on Right) sound further apart; **Reverb** and **Room size** add a
-   room. Applies to every device played through the app, not to the default device.
+5. **Surround** (Position): **Front** plays stereo as usual, **Center** plays the middle
+   (voices), **Rear** plays only the ambience, slightly later, so music and films get a
+   surround feel, e.g. the laptop in front and two JBLs behind you on Rear (one Left, one
+   Right).
+6. **Sound → Space**: **Stereo width** above 100 % makes a speaker pair (one on Left, one
+   on Right) sound further apart; **Reverb** and **Room size** add a room. Applies to every
+   device played through the app, not to the default device.
 7. **Settings**: keep the default device playing, follow the system volume, keep playing
    when the window is closed.
+
+Settings are saved per device in `%APPDATA%\JOPL-StereoBT\settings.toml`.
 
 ### Ping and level meters
 
@@ -99,3 +119,9 @@ to take exclusive control of this device**.
 
 If one app (for example a browser) is muted for the default device in the Windows volume
 mixer, its audio reaches no device. The app shows a warning with an **Unmute** button.
+
+## Licences
+
+JOPL-StereoBT is MIT licensed. The user interface is built with [Slint](https://slint.dev)
+under its Royalty-free Desktop License; the About section on the Settings page shows the
+required Slint notice.

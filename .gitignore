@@ -15,3 +15,5 @@ desktop.ini
 .claude/settings.local.json
 # Personal notes, not part of the project
 NOTE-FOR-JOPL.md
+# Design mockups, kept locally
+/mockups/
