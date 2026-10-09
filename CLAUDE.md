@@ -43,7 +43,7 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - Exe icon + version info: `build.rs` draws the icon with `src/icon.rs` (shared with the tray),
   encodes it with `src/ico.rs` into `OUT_DIR/app.ico` and embeds it via `winresource`.
 - Window chrome: `ui::select_backend` uses Slint's `unstable-winit-030` hook (Slint pinned
-  `~1.18` because of it) for a dark navy title bar and the Mica backdrop; `Theme.background`
+  `~1.18` because of it) for a dark title bar and the Mica backdrop; `Theme.window`
   is slightly translucent. No installer: the exe is portable.
 
 ## Slint notes
@@ -52,11 +52,15 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - User interaction replaces a control's value binding; components re-push model values in a
   `changed device => { ... }` handler. Element ids inside `if` blocks are not reachable from
   outside, so such controls live in their own component (`DeviceControls`).
-- Look follows WaveSync (dark navy cards, purple→blue gradient): tokens in `ui/theme.slint`,
-  custom accessible controls in `ui/controls.slint` (`AccentSlider` with arrow/PageUp/Home/End
-  keys, `AccentCheckBox`, `Segmented`, `Pill`, `OutlineButton`, `GradientButton`). Std
-  widgets only for `ScrollView` and `AboutSlint`.
-- The source (default) device's checkbox is the include-default toggle; `Settings::default()`
+- Look: Windows 11 Fluent dark (design: `mockups/windows11-2-pages.html`). Navigation rail
+  with three pages: **Devices** (every setting per device), **Sync** (timing chart from the
+  last mic measurement, Measure with the microphone, Sync by ear) and **Settings** (toggles +
+  About). One button "Play on multiple devices" / "Stop playing"; the info bar says
+  Active/Off. Tokens in `ui/theme.slint`, accessible controls in `ui/controls.slint`
+  (`Slider` with arrow/PageUp/Home/End keys, `ToggleSwitch`, `Segmented`, `CommandButton`,
+  `SubtleButton`, `InfoBar`, `NavItem`, `Card`). Std widgets only for `ScrollView` and
+  `AboutSlint` (licence: About lives on the Settings page).
+- The source (default) device's switch is the include-default toggle; `Settings::default()`
   has it **on** (default device keeps playing), muting is opt-in.
 
 ## Volume and default device

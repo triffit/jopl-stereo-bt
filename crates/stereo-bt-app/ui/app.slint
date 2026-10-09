@@ -1,9 +1,10 @@
-// JOPL-StereoBT main window: dark navy cards with a purple/blue accent.
-// Standard widgets (scroll bars, About panel) use the Fluent dark style (build.rs).
+// JOPL-StereoBT main window: a Windows 11 app with a navigation rail and
+// three pages (Devices, Sync, Settings). Standard widgets (scroll bars,
+// About panel) use the Fluent dark style (build.rs).
 
 import { AboutSlint, ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { AccentCheckBox, AccentSlider, GradientButton, OutlineButton, Pill, Segmented, SmallButton } from "controls.slint";
+import { Card, CommandButton, Dot, Icon, InfoBar, NavItem, Segmented, Slider, SubtleButton, ToggleSwitch } from "controls.slint";
 
 export struct DeviceRow {
     id: string,
@@ -11,15 +12,27 @@ export struct DeviceRow {
     is-source: bool,
     checked: bool,
     can-make-default: bool,
-    subtitle: string,
-    // Empty when the card shows no badge.
-    badge: string,
-    // 0 info, 1 good, 2 neutral, 3 warning, 4 error
-    badge-kind: int,
+    // Headphones, earbuds or a headset (picks the icon).
+    worn: bool,
+    // Section title shown above this card; empty for none.
+    heading: string,
+    status: string,
+    // 0 neutral, 1 good, 2 caution, 3 error
+    tone: int,
     // 0 stereo, 1 left only, 2 right only, 3 mono mix
     mode: int,
     delay: float,
     volume: float,
+}
+
+// One lane of the timing overview, in milliseconds.
+export struct Lane {
+    name: string,
+    own: float,
+    delay: float,
+    plays: float,
+    is-source: bool,
+    in-sync: bool,
 }
 
 // What the sync assistant shows; phase 0 measuring, 1 results, 2 fine-tune.
@@ -35,6 +48,12 @@ export struct AssistantState {
     can-next: bool,
 }
 
+export struct AssistantResult {
+    name: string,
+    text: string,
+    warning: bool,
+}
+
 // Microphone measurement; phase 0 running, 1 result, 2 failed.
 export struct MeasureState {
     active: bool,
@@ -44,67 +63,358 @@ export struct MeasureState {
     can-apply: bool,
 }
 
-component MeasurePanel inherits Rectangle {
+component SectionTitle inherits Text {
+    color: Theme.text;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+component Description inherits Text {
+    color: Theme.text-3;
+    font-size: 12px;
+    wrap: word-wrap;
+}
+
+component Separator inherits Rectangle {
+    height: 1px;
+    background: Theme.stroke;
+}
+
+// Icon, title and description on the left; children on the right.
+component CardHeader inherits HorizontalLayout {
+    in property <string> glyph;
+    in property <string> title;
+    in property <string> description;
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    spacing: 16px;
+    min-height: 68px;
+    Icon {
+        glyph: root.glyph;
+        font-size: 20px;
+        width: 24px;
+    }
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        horizontal-stretch: 1;
+        Text {
+            text: root.title;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        if root.description != "": Description {
+            text: root.description;
+        }
+    }
+    @children
+}
+
+// Channels, delay and volume of one playing device.
+component DeviceControls inherits HorizontalLayout {
+    in property <DeviceRow> device;
+    callback mode-changed(int);
+    callback delay-changed(float);
+    callback volume-changed(float);
+
+    // User interaction replaces a control's value binding, so push
+    // external changes (e.g. applied measurements) in explicitly.
+    changed device => {
+        volume-slider.value = device.volume;
+        delay-slider.value = device.delay;
+        mode-picker.current = device.mode;
+    }
+
+    padding-left: 56px;
+    padding-right: 16px;
+    padding-top: 12px;
+    padding-bottom: 14px;
+    spacing: 28px;
+    VerticalLayout {
+        spacing: 6px;
+        Description {
+            text: "Channels";
+            color: Theme.text-2;
+        }
+        mode-picker := Segmented {
+            width: 248px;
+            options: ["Stereo", "Left", "Right", "Mono"];
+            current: device.mode;
+            label: "Channels for " + device.name;
+            selected(mode) => { root.mode-changed(mode); }
+        }
+    }
+    VerticalLayout {
+        spacing: 0;
+        horizontal-stretch: 1;
+        Description {
+            text: "Delay";
+            color: Theme.text-2;
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            delay-slider := Slider {
+                minimum: 0;
+                maximum: 500;
+                value: device.delay;
+                label: "Delay in milliseconds for " + device.name;
+                changed(value) => { root.delay-changed(value); }
+            }
+            Text {
+                text: round(delay-slider.value) + " ms";
+                color: Theme.text;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                min-width: 52px;
+            }
+        }
+    }
+    VerticalLayout {
+        spacing: 0;
+        horizontal-stretch: 1;
+        Description {
+            text: "Volume";
+            color: Theme.text-2;
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            volume-slider := Slider {
+                minimum: 0;
+                maximum: 100;
+                value: device.volume;
+                label: "Volume for " + device.name;
+                changed(value) => { root.volume-changed(value); }
+            }
+            Text {
+                text: round(volume-slider.value);
+                color: Theme.text;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                min-width: 30px;
+            }
+        }
+    }
+}
+
+component DeviceCard inherits Card {
+    in property <DeviceRow> device;
+    callback checked-changed(bool);
+    callback make-default();
+    callback mode-changed(int);
+    callback delay-changed(float);
+    callback volume-changed(float);
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 12px;
+            padding-bottom: 12px;
+            spacing: 16px;
+            min-height: 68px;
+            Icon {
+                glyph: device.worn ? "\u{E7F6}" : "\u{E7F5}";
+                font-size: 20px;
+                width: 24px;
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: device.name;
+                    color: Theme.text;
+                    overflow: elide;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Dot {
+                            tone: device.tone;
+                        }
+                    }
+                    Text {
+                        text: device.status;
+                        font-size: 12px;
+                        color: device.tone == 2 ? Theme.caution : device.tone == 3 ? Theme.error : Theme.text-3;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+            if device.can-make-default: VerticalLayout {
+                alignment: center;
+                SubtleButton {
+                    text: "Make default";
+                    label: "Make " + device.name + " the Windows default device";
+                    clicked => { root.make-default(); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                ToggleSwitch {
+                    text: device.is-source ? "Keep playing" : device.checked ? "On" : "Off";
+                    label: device.is-source ? "Keep " + device.name + " playing" : "Play on " + device.name;
+                    checked: device.checked;
+                    toggled(on) => { root.checked-changed(on); }
+                }
+            }
+        }
+        if device.checked && !device.is-source: Separator { }
+        if device.checked && !device.is-source: DeviceControls {
+            device: root.device;
+            mode-changed(mode) => { root.mode-changed(mode); }
+            delay-changed(value) => { root.delay-changed(value); }
+            volume-changed(value) => { root.volume-changed(value); }
+        }
+    }
+}
+
+// When each device is heard, against the default device's line.
+component Timeline inherits Card {
+    in property <[Lane]> lanes;
+    in property <[int]> ticks;
+    in property <float> scale;
+    in property <float> reference;
+    property <length> name-width: 200px;
+    property <length> value-width: 64px;
+
+    accessible-role: list;
+    accessible-label: "When each device plays";
+
+    VerticalLayout {
+        padding: 16px;
+        padding-top: 12px;
+        if root.lanes.length == 0: Description {
+            text: "Measure with the microphone to see when each device plays.";
+            font-size: 14px;
+        }
+        if root.lanes.length > 0: HorizontalLayout {
+            spacing: 12px;
+            Rectangle {
+                width: root.name-width;
+            }
+            Rectangle {
+                height: 20px;
+                horizontal-stretch: 1;
+                for tick in root.ticks: Text {
+                    x: parent.width * (tick / root.scale) - self.width / 2;
+                    width: 48px;
+                    text: tick == 0 ? "0 ms" : tick;
+                    font-size: 11px;
+                    color: Theme.text-3;
+                    horizontal-alignment: center;
+                }
+            }
+            Rectangle {
+                width: root.value-width;
+            }
+        }
+        for lane in root.lanes: HorizontalLayout {
+            spacing: 12px;
+            height: 40px;
+            accessible-role: list-item;
+            accessible-label: lane.name + ": " + round(lane.plays) + " milliseconds" + (lane.is-source ? ", default device" : lane.in-sync ? ", in sync" : ", out of sync");
+            Text {
+                width: root.name-width;
+                text: lane.name;
+                color: Theme.text;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                // Axis line.
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 2px;
+                    background: Theme.control-stroke;
+                }
+                // Our added delay, after the device's own latency.
+                Rectangle {
+                    x: parent.width * (lane.own / root.scale);
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width * (lane.delay / root.scale);
+                    height: 6px;
+                    border-radius: 3px;
+                    background: Theme.accent.with-alpha(0.45);
+                }
+                // The default device's line.
+                Rectangle {
+                    x: parent.width * (root.reference / root.scale);
+                    width: 1px;
+                    background: Theme.text-2;
+                }
+                Rectangle {
+                    x: parent.width * (lane.plays / root.scale) - self.width / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 6px;
+                    background: lane.is-source ? Theme.text : lane.in-sync ? Theme.accent : Theme.caution;
+                }
+            }
+            Text {
+                width: root.value-width;
+                text: round(lane.plays) + " ms";
+                color: lane.is-source || lane.in-sync ? Theme.text-2 : Theme.caution;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// Measurement progress and result inside the Measure card.
+component MeasureDetails inherits VerticalLayout {
     in property <MeasureState> state;
     in property <[string]> lines;
     callback apply();
     callback close();
 
-    border-radius: Theme.radius;
-    background: Theme.card;
-    border-width: 1px;
-    border-color: Theme.border;
-
-    VerticalLayout {
-        padding: 24px;
-        spacing: 12px;
-        Text {
-            text: root.state.phase == 0 ? "Measuring with the microphone" : root.state.phase == 1 ? "Measurement result" : "Measurement stopped";
-            color: Theme.text;
-            font-size: 18px;
-            font-weight: 700;
+    padding-left: 56px;
+    padding-right: 16px;
+    padding-top: 12px;
+    padding-bottom: 16px;
+    spacing: 8px;
+    Text {
+        text: root.state.phase == 0 ? "Measuring" : root.state.phase == 1 ? "Result" : "Measurement stopped";
+        color: Theme.text;
+        font-weight: 600;
+    }
+    if root.state.phase == 0: Description {
+        text: "Each device plays short sweeps in turn while the microphone listens. Keep quiet and pause other audio.";
+    }
+    for line in root.lines: Text {
+        text: line;
+        color: Theme.text-2;
+        wrap: word-wrap;
+    }
+    Text {
+        text: root.state.text;
+        color: root.state.phase == 2 ? Theme.caution : Theme.text;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        if root.state.can-apply: CommandButton {
+            text: "Apply the measured delays";
+            primary: true;
+            clicked => { root.apply(); }
         }
-        if root.state.phase == 0: Text {
-            text: "Each device plays short sweeps in turn while the microphone listens. Keep quiet and pause other audio.";
-            color: Theme.text-muted;
-            wrap: word-wrap;
-        }
-        for line in root.lines: Text {
-            text: line;
-            color: Theme.text;
-            wrap: word-wrap;
-        }
-        Text {
-            text: root.state.text;
-            color: root.state.phase == 2 ? Theme.warning : root.state.phase == 1 ? Theme.accent-light : Theme.text-muted;
-            wrap: word-wrap;
-        }
-        HorizontalLayout {
-            spacing: 10px;
-            alignment: end;
-            if root.state.can-apply: OutlineButton {
-                text: "Apply";
-                clicked => { root.apply(); }
-            }
-            OutlineButton {
-                text: root.state.phase == 0 ? "Cancel" : "Close";
-                clicked => { root.close(); }
-            }
-        }
-        Rectangle {
-            vertical-stretch: 1;
+        CommandButton {
+            text: root.state.phase == 0 ? "Cancel" : "Close";
+            clicked => { root.close(); }
         }
     }
 }
 
-export struct AssistantResult {
-    name: string,
-    text: string,
-    warning: bool,
-}
-
-// Measuring and results steps of the sync assistant.
-component AssistantPanel inherits Rectangle {
+// The tap and results steps of sync by ear, inside its card.
+component AssistantDetails inherits VerticalLayout {
     in property <AssistantState> state;
     in property <[AssistantResult]> results;
     callback tap();
@@ -113,12 +423,13 @@ component AssistantPanel inherits Rectangle {
     callback apply();
     callback cancel();
 
-    border-radius: Theme.radius;
-    background: Theme.card;
-    border-width: 1px;
-    border-color: Theme.border;
+    padding-left: 56px;
+    padding-right: 16px;
+    padding-top: 12px;
+    padding-bottom: 16px;
+    spacing: 10px;
 
-    // Space taps while measuring, wherever focus is inside the panel.
+    // Space taps while measuring, wherever focus is inside the card.
     keys := FocusScope {
         init => { self.focus(); }
         key-pressed(event) => {
@@ -128,285 +439,165 @@ component AssistantPanel inherits Rectangle {
             }
             return reject;
         }
-
         VerticalLayout {
-            padding: 24px;
-            spacing: 14px;
-
+            spacing: 10px;
             if root.state.phase == 0: VerticalLayout {
-                spacing: 14px;
+                spacing: 10px;
                 Text {
-                    text: "Step " + root.state.step + " of " + root.state.steps + " · Listen to " + root.state.device;
+                    text: "Step " + root.state.step + " of " + root.state.steps + ": listen to " + root.state.device;
                     color: Theme.text;
-                    font-size: 18px;
-                    font-weight: 700;
+                    font-weight: 600;
                     wrap: word-wrap;
                 }
-                Text {
+                Description {
                     text: (root.state.is-source
-                        ? "Only the default device plays the clicks now; it is the reference the others are aligned to."
-                        : "Only this device plays the clicks now.")
-                        + " Press Space or Tap each time you hear a click. Pause other audio for best results.";
-                    color: Theme.text-muted;
-                    wrap: word-wrap;
+                        ? "Only the default device plays clicks now; the others are aligned to it."
+                        : "Only this device plays clicks now.")
+                        + " Press Space or Tap each time you hear a click.";
                 }
-                GradientButton {
-                    height: 110px;
+                CommandButton {
+                    height: 88px;
                     text: "Tap";
+                    font-size: 20px;
+                    primary: true;
                     clicked => { root.tap(); }
                 }
                 Text {
-                    text: "Taps: " + root.state.taps + " / " + root.state.taps-wanted;
-                    color: root.state.taps >= root.state.taps-wanted ? Theme.good : Theme.accent-light;
-                    font-size: 15px;
+                    text: "Taps: " + root.state.taps + " of " + root.state.taps-wanted;
+                    color: root.state.taps >= root.state.taps-wanted ? Theme.success : Theme.text-2;
                     horizontal-alignment: center;
                 }
                 HorizontalLayout {
-                    spacing: 10px;
-                    alignment: end;
-                    OutlineButton {
-                        text: "Start over";
-                        clicked => { root.restart(); }
-                    }
-                    OutlineButton {
+                    spacing: 8px;
+                    alignment: start;
+                    CommandButton {
                         text: root.state.step < root.state.steps ? "Next device" : "Show results";
+                        primary: true;
                         enabled: root.state.can-next;
                         clicked => { root.next(); }
                     }
-                    OutlineButton {
+                    CommandButton {
+                        text: "Start over";
+                        clicked => { root.restart(); }
+                    }
+                    CommandButton {
                         text: "Cancel";
                         clicked => { root.cancel(); }
                     }
                 }
             }
-
             if root.state.phase == 1: VerticalLayout {
-                spacing: 12px;
+                spacing: 8px;
                 Text {
                     text: "Suggested delays";
                     color: Theme.text;
-                    font-size: 18px;
-                    font-weight: 700;
+                    font-weight: 600;
                 }
-                Text {
-                    text: "Measured against the default device. After applying, all devices click together so you can fine-tune by ear.";
-                    color: Theme.text-muted;
-                    wrap: word-wrap;
+                Description {
+                    text: "Measured against the default device. After applying, all devices click together so you can fine-tune on the Devices page.";
                 }
                 for result in root.results: HorizontalLayout {
                     spacing: 12px;
                     Text {
                         text: result.name;
                         color: Theme.text;
-                        font-weight: 600;
                         min-width: 220px;
                         overflow: elide;
                     }
                     Text {
                         text: result.text;
-                        color: result.warning ? Theme.warning : Theme.accent-light;
+                        color: result.warning ? Theme.caution : Theme.text-2;
                         wrap: word-wrap;
                         horizontal-stretch: 1;
                     }
                 }
                 HorizontalLayout {
-                    spacing: 10px;
-                    alignment: end;
-                    OutlineButton {
+                    spacing: 8px;
+                    alignment: start;
+                    CommandButton {
                         text: "Apply and fine-tune";
+                        primary: true;
                         clicked => { root.apply(); }
                     }
-                    OutlineButton {
+                    CommandButton {
                         text: "Cancel";
                         clicked => { root.cancel(); }
                     }
                 }
             }
-            Rectangle {
-                vertical-stretch: 1;
-            }
         }
     }
 }
 
-// Volume, delay and channel controls of one target device.
-component DeviceControls inherits GridLayout {
-    in property <DeviceRow> device;
-    callback mode-changed(int);
-    callback delay-changed(float);
-    callback volume-changed(float);
-
-    // User interaction replaces a control's value binding, so push
-    // external changes (e.g. saved settings) in explicitly.
-    changed device => {
-        volume-slider.value = device.volume;
-        delay-slider.value = device.delay;
-        mode-picker.current = device.mode;
-    }
-
-    spacing-horizontal: 12px;
-    spacing-vertical: 6px;
-    Row {
-        Text {
-            text: "Vol";
-            color: Theme.text-muted;
-            font-size: 13px;
-            vertical-alignment: center;
-            min-width: 48px;
-        }
-        volume-slider := AccentSlider {
-            minimum: 0;
-            maximum: 100;
-            value: device.volume;
-            label: "Volume for " + device.name;
-            changed(value) => { root.volume-changed(value); }
-        }
-        Text {
-            text: round(device.volume);
-            color: Theme.accent-light;
-            font-size: 13px;
-            horizontal-alignment: right;
-            vertical-alignment: center;
-            min-width: 52px;
-        }
-    }
-    Row {
-        Text {
-            text: "Delay";
-            color: Theme.text-muted;
-            font-size: 13px;
-            vertical-alignment: center;
-        }
-        delay-slider := AccentSlider {
-            minimum: 0;
-            maximum: 500;
-            value: device.delay;
-            label: "Delay in milliseconds for " + device.name;
-            changed(value) => { root.delay-changed(value); }
-        }
-        Text {
-            text: round(device.delay) + " ms";
-            color: Theme.info;
-            font-size: 13px;
-            horizontal-alignment: right;
-            vertical-alignment: center;
-        }
-    }
-    Row {
-        Text {
-            text: "Channel";
-            color: Theme.text-muted;
-            font-size: 13px;
-            vertical-alignment: center;
-        }
-        mode-picker := Segmented {
-            colspan: 2;
-            options: ["Stereo", "Left", "Right", "Mono"];
-            current: device.mode;
-            label: "Channels for " + device.name;
-            selected(mode) => { root.mode-changed(mode); }
-        }
-    }
-}
-
-component DeviceCard inherits Rectangle {
-    in property <DeviceRow> device;
-    callback checked-changed(bool);
-    callback make-default();
-    callback mode-changed(int);
-    callback delay-changed(float);
-    callback volume-changed(float);
-
-    border-radius: Theme.radius;
-    background: Theme.card;
-    border-width: 1px;
-    border-color: Theme.border;
-
-    HorizontalLayout {
-        padding: 18px;
-        spacing: 16px;
+// A setting with a toggle switch.
+component SettingCard inherits Card {
+    in property <string> glyph;
+    in property <string> title;
+    in property <string> description;
+    in property <bool> checked;
+    callback toggled(bool);
+    CardHeader {
+        glyph: root.glyph;
+        title: root.title;
+        description: root.description;
         VerticalLayout {
             alignment: center;
-            AccentCheckBox {
-                checked: device.checked;
-                label: device.is-source ? "Keep " + device.name + " playing" : "Play on " + device.name;
-                toggled(on) => { root.checked-changed(on); }
+            ToggleSwitch {
+                text: root.checked ? "On" : "Off";
+                label: root.title;
+                checked: root.checked;
+                toggled(on) => { root.toggled(on); }
             }
-        }
-        VerticalLayout {
-            alignment: center;
-            spacing: 4px;
-            horizontal-stretch: 1;
-            Text {
-                text: device.name;
-                color: Theme.text;
-                font-size: 15px;
-                font-weight: 600;
-                overflow: elide;
-            }
-            Text {
-                text: device.subtitle;
-                color: Theme.text-muted;
-                font-size: 13px;
-                overflow: elide;
-            }
-            if device.can-make-default: HorizontalLayout {
-                alignment: start;
-                padding-top: 4px;
-                SmallButton {
-                    text: "Make default";
-                    label: "Make " + device.name + " the Windows default device";
-                    clicked => { root.make-default(); }
-                }
-            }
-        }
-        if device.badge != "": VerticalLayout {
-            alignment: center;
-            Pill {
-                text: device.badge;
-                kind: device.badge-kind;
-            }
-        }
-        if !device.is-source: DeviceControls {
-            width: 330px;
-            device: root.device;
-            mode-changed(mode) => { root.mode-changed(mode); }
-            delay-changed(value) => { root.delay-changed(value); }
-            volume-changed(value) => { root.volume-changed(value); }
         }
     }
 }
 
 export component MainWindow inherits Window {
-    title: "JOPL-StereoBT — Every device, in sync";
+    title: "JOPL-StereoBT";
     icon: @image-url("icon.png");
-    background: Theme.background;
-    min-width: 760px;
-    preferred-width: 940px;
-    min-height: 520px;
-    preferred-height: 740px;
+    background: Theme.window;
+    min-width: 980px;
+    preferred-width: 1120px;
+    min-height: 560px;
+    preferred-height: 800px;
     default-font-size: 14px;
 
     in property <[DeviceRow]> devices;
     in property <bool> running;
-    in property <string> status-line;
+    // "Active" or "Off", and what is happening.
+    in property <string> status-word;
+    in property <string> status-message;
     // 0 idle, 1 streaming, 2 waiting
     in property <int> status-kind;
     in property <string> error-text;
     in property <string> version;
+    in property <bool> include-default;
     in property <bool> follow-system-volume;
+    in property <bool> keep-streaming-on-close;
+    // Current Windows volume, e.g. "45 %"; empty when not following.
+    in property <string> system-volume-text;
     in property <AssistantState> assistant;
-    // Warning about an app muted on the default device; empty when none.
-    in property <string> muted-app-text;
-    in property <int> muted-app-pid;
     in property <[AssistantResult]> assistant-results;
     in property <MeasureState> measure;
     in property <[string]> measure-lines;
-    // Current Windows volume, e.g. "45 %"; empty when not following.
-    in property <string> system-volume-text;
+    // Warning about an app muted on the default device; empty when none.
+    in property <string> muted-app-text;
+    in property <int> muted-app-pid;
+    in property <[Lane]> lanes;
+    in property <[int]> lane-ticks;
+    in property <float> lane-scale: 100;
+    in property <float> lane-reference;
+    // The microphone of the last measurement; empty when none counts.
+    in property <string> measured-with;
+    in property <bool> out-of-sync;
+
+    // 0 Devices, 1 Sync, 2 Settings
+    in-out property <int> page;
 
     callback toggle-running();
+    callback include-default-changed(bool);
     callback follow-system-volume-changed(bool);
+    callback keep-streaming-changed(bool);
     callback unmute-app(int);
     callback measure-start();
     callback measure-apply();
@@ -423,241 +614,300 @@ export component MainWindow inherits Window {
     callback delay-changed(string, float);
     callback volume-changed(string, float);
 
-    about-popup := PopupWindow {
-        x: (root.width - 380px) / 2;
-        y: 100px;
-        width: 380px;
-        Rectangle {
-            background: Theme.card;
-            border-radius: Theme.radius;
-            border-width: 1px;
-            border-color: Theme.border;
-            VerticalLayout {
-                padding: 20px;
-                spacing: 10px;
-                Text {
-                    text: "JOPL-StereoBT " + root.version;
-                    color: Theme.text;
-                    font-size: 18px;
-                    font-weight: 700;
-                }
-                Text {
-                    text: "Play system audio on several devices at once, in sync.\nMIT licence · © 2026 JOPL, Triffit\nInspired by WaveSync.";
-                    color: Theme.text-muted;
-                    wrap: word-wrap;
-                }
-                AboutSlint { }
-            }
+    property <bool> busy: root.assistant.active || root.measure.active;
+
+    // Fine-tuning happens with the delay sliders.
+    changed assistant => {
+        if (root.assistant.active && root.assistant.phase == 2) {
+            root.page = 0;
         }
     }
 
-    VerticalLayout {
-        padding: 34px;
-        padding-top: 30px;
-        padding-bottom: 18px;
-        spacing: 18px;
-
-        HorizontalLayout {
-            spacing: 16px;
+    HorizontalLayout {
+        // Navigation rail.
+        VerticalLayout {
+            width: 260px;
+            padding: 6px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 4px;
+            accessible-role: tab-list;
+            accessible-label: "Pages";
+            NavItem {
+                glyph: "\u{E7F5}";
+                text: "Devices";
+                selected: root.page == 0;
+                clicked => { root.page = 0; }
+            }
+            NavItem {
+                glyph: "\u{E895}";
+                text: "Sync";
+                badge: root.out-of-sync;
+                selected: root.page == 1;
+                clicked => { root.page = 1; }
+            }
             Rectangle {
-                width: 52px;
-                height: 52px;
-                border-radius: 12px;
-                background: Theme.gradient;
-                Image {
-                    source: @image-url("icon.png");
-                    width: 34px;
-                    height: 34px;
-                }
+                vertical-stretch: 1;
             }
-            VerticalLayout {
-                alignment: center;
-                spacing: 2px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "JOPL-StereoBT";
-                    color: Theme.text;
-                    font-size: 26px;
-                    font-weight: 700;
-                }
-                Text {
-                    text: "Every device, in sync.";
-                    color: Theme.text-muted;
-                }
-            }
-            VerticalLayout {
-                alignment: center;
-                HorizontalLayout {
-                    spacing: 10px;
-                    OutlineButton {
-                        text: "Measure with mic";
-                        enabled: root.running && !root.assistant.active && !root.measure.active;
-                        clicked => { root.measure-start(); }
-                    }
-                    OutlineButton {
-                        text: "Sync assistant";
-                        enabled: root.running && !root.assistant.active && !root.measure.active;
-                        clicked => { root.assistant-start(); }
-                    }
-                    OutlineButton {
-                        text: "About";
-                        clicked => { about-popup.show(); }
-                    }
-                }
+            NavItem {
+                glyph: "\u{E713}";
+                text: "Settings";
+                selected: root.page == 2;
+                clicked => { root.page = 2; }
             }
         }
 
+        // Content.
         Rectangle {
-            height: 50px;
-            border-radius: Theme.radius;
-            background: Theme.card;
+            horizontal-stretch: 1;
+            background: Theme.page;
+            border-top-left-radius: Theme.radius;
             border-width: 1px;
-            border-color: Theme.border;
-            HorizontalLayout {
-                padding-left: 18px;
-                padding-right: 18px;
-                spacing: 12px;
+            border-color: Theme.stroke;
+
+            ScrollView {
                 VerticalLayout {
-                    alignment: center;
-                    Rectangle {
-                        width: 9px;
-                        height: 9px;
-                        border-radius: 4.5px;
-                        background: root.status-kind == 1 ? Theme.good : root.status-kind == 2 ? Theme.warning : Theme.info;
+                    padding-left: 36px;
+                    padding-right: 36px;
+                    padding-top: 28px;
+                    padding-bottom: 28px;
+                    spacing: 8px;
+                    alignment: start;
+
+                    HorizontalLayout {
+                        spacing: 16px;
+                        padding-bottom: 8px;
+                        Text {
+                            text: root.page == 0 ? "Devices" : root.page == 1 ? "Sync" : "Settings";
+                            color: Theme.text;
+                            font-size: 28px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            CommandButton {
+                                height: 36px;
+                                text: root.running ? "Stop playing" : "Play on multiple devices";
+                                glyph: root.running ? "\u{E71A}" : "\u{E768}";
+                                primary: !root.running;
+                                font-size: 15px;
+                                clicked => { root.toggle-running(); }
+                            }
+                        }
                     }
-                }
-                Text {
-                    text: root.status-line;
-                    color: Theme.text-muted;
-                    vertical-alignment: center;
-                    overflow: elide;
-                    horizontal-stretch: 1;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    AccentCheckBox {
+
+                    InfoBar {
+                        tone: root.status-kind == 1 ? 1 : root.status-kind == 2 ? 2 : 0;
+                        title: root.status-word;
+                        message: root.status-message;
+                    }
+                    if root.error-text != "": InfoBar {
+                        tone: 3;
+                        title: "Error";
+                        message: root.error-text;
+                    }
+                    if root.muted-app-text != "": InfoBar {
+                        tone: 2;
+                        title: "";
+                        message: root.muted-app-text;
+                        VerticalLayout {
+                            alignment: center;
+                            CommandButton {
+                                text: "Unmute";
+                                clicked => { root.unmute-app(root.muted-app-pid); }
+                            }
+                        }
+                    }
+
+                    // Devices page.
+                    if root.page == 0 && root.assistant.active && root.assistant.phase == 2: InfoBar {
+                        tone: 0;
+                        title: "Fine-tune";
+                        message: "Every device clicks together now. Move each Delay until the clicks sound like one. Still late at 0 ms? Make the slowest device the default.";
+                        VerticalLayout {
+                            alignment: center;
+                            CommandButton {
+                                text: "Done";
+                                primary: true;
+                                clicked => { root.assistant-close(); }
+                            }
+                        }
+                    }
+                    if root.page == 0: VerticalLayout {
+                        spacing: 8px;
+                        for row in root.devices: VerticalLayout {
+                        spacing: 8px;
+                        if row.heading != "": SectionTitle {
+                            text: row.heading;
+                            height: 36px;
+                            vertical-alignment: bottom;
+                        }
+                        DeviceCard {
+                            device: row;
+                            checked-changed(on) => { root.checked-changed(row.id, on); }
+                            make-default => { root.make-default(row.id); }
+                            mode-changed(mode) => { root.mode-changed(row.id, mode); }
+                            delay-changed(value) => { root.delay-changed(row.id, value); }
+                            volume-changed(value) => { root.volume-changed(row.id, value); }
+                        }
+                        }
+                        if root.devices.length == 0: Description {
+                            text: "No output devices found.";
+                            font-size: 14px;
+                        }
+                    }
+
+                    // Sync page.
+                    if root.page == 1: VerticalLayout {
+                    spacing: 8px;
+                    SectionTitle {
+                        text: "When each device plays";
+                        height: 36px;
+                        vertical-alignment: bottom;
+                    }
+                    Timeline {
+                        lanes: root.lanes;
+                        ticks: root.lane-ticks;
+                        scale: root.lane-scale;
+                        reference: root.lane-reference;
+                    }
+                    SectionTitle {
+                        text: "Make them play together";
+                        height: 36px;
+                        vertical-alignment: bottom;
+                    }
+                    Card {
+                        VerticalLayout {
+                            CardHeader {
+                                glyph: "\u{E720}";
+                                title: "Measure with the microphone";
+                                description: root.running
+                                    ? "Recommended. Each device plays short sweeps while your microphone listens; takes about 20 seconds."
+                                    : "Press Play on multiple devices first.";
+                                VerticalLayout {
+                                    alignment: center;
+                                    CommandButton {
+                                        text: "Measure";
+                                        primary: true;
+                                        enabled: root.running && !root.busy;
+                                        clicked => { root.measure-start(); }
+                                    }
+                                }
+                            }
+                            if root.measure.active: Separator { }
+                            if root.measure.active: MeasureDetails {
+                                state: root.measure;
+                                lines: root.measure-lines;
+                                apply => { root.measure-apply(); }
+                                close => { root.measure-close(); }
+                            }
+                            if !root.measure.active && root.measured-with != "": Separator { }
+                            if !root.measure.active && root.measured-with != "": HorizontalLayout {
+                                // Aligned with the card title.
+                                padding-left: 56px;
+                                padding-right: 16px;
+                                padding-top: 12px;
+                                padding-bottom: 12px;
+                                Description {
+                                    text: "Last measured with " + root.measured-with + ". The chart above shows the current delays.";
+                                    font-size: 14px;
+                                    color: Theme.text-2;
+                                }
+                            }
+                        }
+                    }
+                    Card {
+                        VerticalLayout {
+                            CardHeader {
+                                glyph: "\u{E767}";
+                                title: "Sync by ear";
+                                description: root.running
+                                    ? "Tap along with clicks on each device, then fine-tune until the clicks sound as one."
+                                    : "Press Play on multiple devices first.";
+                                VerticalLayout {
+                                    alignment: center;
+                                    CommandButton {
+                                        text: "Start";
+                                        enabled: root.running && !root.busy;
+                                        clicked => { root.assistant-start(); }
+                                    }
+                                }
+                            }
+                            if root.assistant.active && root.assistant.phase != 2: Separator { }
+                            if root.assistant.active && root.assistant.phase != 2: AssistantDetails {
+                                state: root.assistant;
+                                results: root.assistant-results;
+                                tap => { root.assistant-tap(); }
+                                next => { root.assistant-next(); }
+                                restart => { root.assistant-restart(); }
+                                apply => { root.assistant-apply(); }
+                                cancel => { root.assistant-close(); }
+                            }
+                        }
+                    }
+
+                    }
+
+                    // Settings page.
+                    if root.page == 2: VerticalLayout {
+                    spacing: 8px;
+                    SectionTitle {
+                        text: "Playback";
+                        height: 36px;
+                        vertical-alignment: bottom;
+                    }
+                    SettingCard {
+                        glyph: "\u{E7F5}";
+                        title: "Keep the default device playing";
+                        description: "Off: the default device is muted while playing and only feeds the other devices.";
+                        checked: root.include-default;
+                        toggled(on) => { root.include-default-changed(on); }
+                    }
+                    SettingCard {
+                        glyph: "\u{E767}";
+                        title: "Follow system volume";
+                        description: "Every device follows the Windows volume of the default device"
+                            + (root.system-volume-text != "" ? " (now " + root.system-volume-text + ")." : ".");
                         checked: root.follow-system-volume;
-                        label: "Follow system volume";
                         toggled(on) => { root.follow-system-volume-changed(on); }
                     }
-                }
-                Text {
-                    text: "Follow system volume";
-                    color: Theme.text;
-                    vertical-alignment: center;
-                }
-                if root.system-volume-text != "": Text {
-                    text: root.system-volume-text;
-                    color: Theme.accent-light;
-                    vertical-alignment: center;
-                    min-width: 40px;
-                    horizontal-alignment: right;
-                }
-            }
-        }
-
-        if root.muted-app-text != "": Rectangle {
-            border-radius: Theme.radius;
-            background: Theme.warning.with-alpha(0.12);
-            border-width: 1px;
-            border-color: Theme.warning;
-            HorizontalLayout {
-                padding: 12px;
-                spacing: 14px;
-                Text {
-                    text: root.muted-app-text;
-                    color: Theme.text;
-                    wrap: word-wrap;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    OutlineButton {
-                        text: "Unmute";
-                        clicked => { root.unmute-app(root.muted-app-pid); }
+                    SettingCard {
+                        glyph: "\u{E737}";
+                        title: "Keep playing when the window is closed";
+                        description: "The app keeps playing from the notification area; quit it from its menu there.";
+                        checked: root.keep-streaming-on-close;
+                        toggled(on) => { root.keep-streaming-changed(on); }
+                    }
+                    SectionTitle {
+                        text: "About";
+                        height: 36px;
+                        vertical-alignment: bottom;
+                    }
+                    Card {
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 8px;
+                            Text {
+                                text: "JOPL-StereoBT " + root.version;
+                                color: Theme.text;
+                                font-weight: 600;
+                            }
+                            Description {
+                                text: "Plays system audio on several devices at once, in sync.\nMIT licence, © 2026 JOPL, Triffit. Inspired by WaveSync.";
+                                font-size: 14px;
+                                color: Theme.text-2;
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                AboutSlint { }
+                            }
+                        }
+                    }
                     }
                 }
             }
-        }
-
-        if root.assistant.active && root.assistant.phase == 2: Rectangle {
-            border-radius: Theme.radius;
-            background: Theme.accent.with-alpha(0.14);
-            border-width: 1px;
-            border-color: Theme.accent;
-            HorizontalLayout {
-                padding: 14px;
-                spacing: 14px;
-                Text {
-                    text: "Fine-tune: every device clicks together now. Adjust each Delay until the clicks sound like one. A device that is still late at 0 ms: make the slowest device the default.";
-                    color: Theme.text;
-                    wrap: word-wrap;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    OutlineButton {
-                        text: "Done";
-                        clicked => { root.assistant-close(); }
-                    }
-                }
-            }
-        }
-
-        if root.measure.active: MeasurePanel {
-            vertical-stretch: 1;
-            state: root.measure;
-            lines: root.measure-lines;
-            apply => { root.measure-apply(); }
-            close => { root.measure-close(); }
-        }
-
-        if root.assistant.active && root.assistant.phase != 2: AssistantPanel {
-            vertical-stretch: 1;
-            state: root.assistant;
-            results: root.assistant-results;
-            tap => { root.assistant-tap(); }
-            next => { root.assistant-next(); }
-            restart => { root.assistant-restart(); }
-            apply => { root.assistant-apply(); }
-            cancel => { root.assistant-close(); }
-        }
-
-        if !root.measure.active && (!root.assistant.active || root.assistant.phase == 2): ScrollView {
-            vertical-stretch: 1;
-            VerticalLayout {
-                spacing: 12px;
-                alignment: start;
-                // Keep cards clear of the vertical scroll bar.
-                padding-right: 14px;
-                for row in root.devices: DeviceCard {
-                    device: row;
-                    checked-changed(on) => { root.checked-changed(row.id, on); }
-                    make-default => { root.make-default(row.id); }
-                    mode-changed(mode) => { root.mode-changed(row.id, mode); }
-                    delay-changed(value) => { root.delay-changed(row.id, value); }
-                    volume-changed(value) => { root.volume-changed(row.id, value); }
-                }
-                if root.devices.length == 0: Text {
-                    text: "No output devices found.";
-                    color: Theme.text-muted;
-                    horizontal-alignment: center;
-                }
-            }
-        }
-
-        GradientButton {
-            text: root.running ? "Stop multi-output" : "Start multi-output";
-            clicked => { root.toggle-running(); }
-        }
-
-        Text {
-            text: root.error-text != "" ? root.error-text : root.running ? "Streaming" : "Idle";
-            color: root.error-text != "" ? Theme.error : Theme.text-muted;
-            font-size: 13px;
-            wrap: word-wrap;
         }
     }
 }
@@ -665,7 +915,8 @@ export component MainWindow inherits Window {
 // Shown instead of the main window when the audio engine cannot start.
 export component ErrorWindow inherits Window {
     title: "JOPL-StereoBT";
-    background: Theme.background;
+    background: Theme.window;
+    default-font-size: 14px;
     in property <string> message;
     callback close-requested();
     VerticalLayout {
@@ -674,17 +925,20 @@ export component ErrorWindow inherits Window {
         Text {
             text: "JOPL-StereoBT could not start";
             color: Theme.text;
-            font-size: 18px;
-            font-weight: 700;
+            font-size: 20px;
+            font-weight: 600;
         }
         Text {
             text: root.message;
-            color: Theme.text-muted;
+            color: Theme.text-2;
             wrap: word-wrap;
         }
-        OutlineButton {
-            text: "Close";
-            clicked => { root.close-requested(); }
+        HorizontalLayout {
+            alignment: end;
+            CommandButton {
+                text: "Close";
+                clicked => { root.close-requested(); }
+            }
         }
     }
 }

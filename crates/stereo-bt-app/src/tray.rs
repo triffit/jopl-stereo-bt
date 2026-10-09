@@ -27,7 +27,7 @@ impl Tray {
     /// Adds the tray icon. Must run on the UI thread.
     pub(crate) fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let show = MenuItem::new("Show JOPL-StereoBT", true, None);
-        let toggle = MenuItem::new("Start", true, None);
+        let toggle = MenuItem::new("Play on multiple devices", true, None);
         let quit = MenuItem::new("Quit", true, None);
         let menu = Menu::new();
         menu.append_items(&[&show, &toggle, &PredefinedMenuItem::separator(), &quit])?;
@@ -73,7 +73,11 @@ impl Tray {
             return;
         }
         self.running = running;
-        self.toggle.set_text(if running { "Stop" } else { "Start" });
+        self.toggle.set_text(if running {
+            "Stop playing"
+        } else {
+            "Play on multiple devices"
+        });
         let tooltip = if running {
             "JOPL-StereoBT · streaming"
         } else {

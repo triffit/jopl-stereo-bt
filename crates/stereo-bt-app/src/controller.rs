@@ -12,7 +12,7 @@ use stereo_bt_engine::{
 use crate::assistant::{Assistant, Phase, Step, TAPS_WANTED};
 use crate::settings::{DeviceSettings, Settings};
 use crate::settings_store::SettingsStore;
-use crate::view_model::{self, DeviceRow, StatusKind};
+use crate::view_model::{self, DeviceRow, Lane, Measurement, StatusKind};
 
 /// Settings are written this long after the last change, so dragging a
 /// slider does not write the file on every step.
@@ -130,17 +130,32 @@ pub(crate) struct AssistantView {
     pub(crate) results: Vec<ResultLine>,
 }
 
-/// Everything the window displays.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct View {
-    pub(crate) running: bool,
+/// The on/off settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Toggles {
     pub(crate) include_default: bool,
     pub(crate) follow_system_volume: bool,
+    pub(crate) keep_streaming_on_close: bool,
+}
+
+/// Everything the window displays.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct View {
+    pub(crate) running: bool,
+    pub(crate) toggles: Toggles,
     /// The followed Windows volume in percent, while streaming and following.
     pub(crate) system_volume_percent: Option<u8>,
     pub(crate) rows: Vec<DeviceRow>,
-    pub(crate) status_line: String,
+    /// "Active" or "Off".
+    pub(crate) status_word: &'static str,
+    pub(crate) status_message: String,
     pub(crate) status_kind: StatusKind,
+    /// When each device is heard, from the last microphone measurement.
+    pub(crate) lanes: Vec<Lane>,
+    /// The microphone of the last measurement, if one counts.
+    pub(crate) measured_with: Option<String>,
+    /// Playing devices measured to be out of sync.
+    pub(crate) out_of_sync: usize,
     pub(crate) error: Option<String>,
     pub(crate) assistant: Option<AssistantView>,
     /// Warning about an app muted on the default device, with its pid.
@@ -158,6 +173,7 @@ pub(crate) struct Controller<E: EngineControl, S: SettingsStore> {
     engine_dirty: bool,
     unsaved_since: Option<Instant>,
     assistant: Option<Assistant>,
+    last_measurement: Option<Measurement>,
 }
 
 impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
@@ -181,6 +197,7 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
             engine_dirty: false,
             unsaved_since: None,
             assistant: None,
+            last_measurement: None,
         };
         if controller.settings.learn(&controller.status.devices) {
             controller.unsaved_since = Some(Instant::now());
@@ -188,7 +205,7 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         controller
     }
 
-    /// Start/Stop button (F5).
+    /// The "Play on multiple devices" / "Stop playing" button (F5).
     pub(crate) fn toggle_running(&mut self) {
         if self.running {
             self.assistant_close();
@@ -225,6 +242,16 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
             Err(e) => self.error = Some(format!("Could not make it the default device: {e}")),
         }
         self.status = self.engine.status();
+    }
+
+    /// Whether closing the window while playing keeps playing in the tray.
+    pub(crate) fn keeps_streaming_on_close(&self) -> bool {
+        self.settings.keep_streaming_on_close
+    }
+
+    pub(crate) fn set_keep_streaming_on_close(&mut self, keep: bool) {
+        self.settings.keep_streaming_on_close = keep;
+        self.unsaved_since.get_or_insert_with(Instant::now);
     }
 
     /// Makes every device follow the Windows volume (or not).
@@ -270,6 +297,7 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
     /// changes to the engine and save settings once edits settle.
     pub(crate) fn tick(&mut self, now: Instant) {
         self.status = self.engine.status();
+        self.remember_measurement();
         if self.settings.learn(&self.status.devices) {
             self.unsaved_since.get_or_insert(now);
         }
@@ -296,13 +324,26 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
     }
 
     pub(crate) fn view(&self) -> View {
+        let measurement = self.last_measurement.as_ref();
+        let rows = view_model::device_rows(&self.settings, &self.status, measurement);
+        let lanes = view_model::lanes(&self.settings, &self.status, measurement);
+        let (status_word, status_message) = view_model::status_line(&self.settings, &self.status);
         View {
             running: self.running,
-            include_default: self.settings.include_default,
-            follow_system_volume: self.settings.follow_system_volume,
+            toggles: Toggles {
+                include_default: self.settings.include_default,
+                follow_system_volume: self.settings.follow_system_volume,
+                keep_streaming_on_close: self.settings.keep_streaming_on_close,
+            },
             system_volume_percent: self.status.system_volume_percent,
-            rows: view_model::device_rows(&self.settings, &self.status),
-            status_line: view_model::status_line(&self.settings, &self.status),
+            out_of_sync: view_model::out_of_sync(&rows),
+            measured_with: (!lanes.is_empty())
+                .then(|| measurement.map(|m| m.microphone.clone()))
+                .flatten(),
+            rows,
+            lanes,
+            status_word,
+            status_message,
             status_kind: view_model::status_kind(&self.status),
             error: self.error.clone().or_else(|| self.engine.last_error()),
             assistant: self.assistant.as_ref().map(|a| self.assistant_view(a)),
@@ -315,7 +356,9 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
     /// best default device and delays (runs in the background).
     pub(crate) fn start_measurement(&mut self) {
         if !self.running {
-            self.error = Some("Start streaming first, then measure with the microphone.".into());
+            self.error = Some(
+                "Press Play on multiple devices first, then measure with the microphone.".into(),
+            );
             return;
         }
         self.assistant_close();
@@ -334,8 +377,19 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
         }
     }
 
+    /// Keeps the latest finished measurement for the timing overview.
+    fn remember_measurement(&mut self) {
+        if let CalibrationState::Done(report) = self.engine.calibration() {
+            self.last_measurement = Some(Measurement::from_latencies(
+                &report.microphone,
+                &report.measured,
+            ));
+        }
+    }
+
     /// Applies the measured advice: default device and delays.
     pub(crate) fn measurement_apply(&mut self) {
+        self.remember_measurement();
         let CalibrationState::Done(report) = self.engine.calibration() else {
             return;
         };
@@ -480,7 +534,7 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
     /// is measured first, alone.
     pub(crate) fn start_assistant(&mut self, now: Instant) {
         if !self.running {
-            self.error = Some("Start streaming first, then run the sync assistant.".into());
+            self.error = Some("Press Play on multiple devices first, then sync by ear.".into());
             return;
         }
         let steps = self.assistant_steps();
@@ -849,7 +903,7 @@ mod tests {
 
         c.set_enabled(&id("A"), true);
 
-        assert!(c.view().include_default);
+        assert!(c.view().toggles.include_default);
         assert!(c.view().rows[0].checked);
     }
 
@@ -862,7 +916,7 @@ mod tests {
         c.set_follow_system_volume(false);
         c.tick(Instant::now());
 
-        assert!(!c.view().follow_system_volume);
+        assert!(!c.view().toggles.follow_system_volume);
         assert!(!engine.0.borrow().updated[0].follow_system_volume);
     }
 
@@ -921,7 +975,12 @@ mod tests {
         c.start_assistant(Instant::now());
 
         assert!(c.view().assistant.is_none());
-        assert!(c.view().error.unwrap().contains("Start streaming"));
+        assert!(
+            c.view()
+                .error
+                .unwrap()
+                .contains("Play on multiple devices first")
+        );
         assert!(!engine.0.borrow().click_track);
     }
 
@@ -1045,7 +1104,12 @@ mod tests {
         c.start_measurement();
 
         assert!(engine.0.borrow().calibration_requests.is_empty());
-        assert!(c.view().error.unwrap().contains("Start streaming"));
+        assert!(
+            c.view()
+                .error
+                .unwrap()
+                .contains("Play on multiple devices first")
+        );
     }
 
     #[test]
@@ -1095,6 +1159,44 @@ mod tests {
 
         assert_eq!(c.view().rows[1].delay_ms, 41);
         assert_eq!(c.view().measurement, None);
+    }
+
+    #[test]
+    fn applied_measurement_stays_visible_as_timing_and_sync_status() {
+        let epoch = Instant::now();
+        let (mut c, engine) = streaming(epoch);
+        engine.0.borrow_mut().calibration = report(stereo_bt_core::CalibrationOutcome::Aligned {
+            delays: vec![(id("B"), stereo_bt_core::Delay::from_millis(41).unwrap())],
+        });
+        c.tick(epoch);
+
+        c.measurement_apply();
+        c.tick(epoch);
+
+        let view = c.view();
+        assert_eq!(view.measured_with.as_deref(), Some("Mic"));
+        assert_eq!(view.lanes.len(), 2);
+        assert_eq!(view.rows[1].status, "In sync");
+        assert_eq!(view.out_of_sync, 0);
+
+        c.set_delay(&id("B"), 29);
+
+        assert_eq!(c.view().rows[1].status, "Plays 12 ms early");
+        assert_eq!(c.view().out_of_sync, 1);
+    }
+
+    #[test]
+    fn keep_streaming_on_close_is_a_saved_setting() {
+        let (mut c, _, store) = controller();
+        assert!(c.keeps_streaming_on_close());
+        let start = Instant::now();
+
+        c.set_keep_streaming_on_close(false);
+        c.tick(start + SAVE_DELAY + Duration::from_millis(1));
+
+        assert!(!c.keeps_streaming_on_close());
+        assert!(!c.view().toggles.keep_streaming_on_close);
+        assert!(!store.saved.borrow().last().unwrap().keep_streaming_on_close);
     }
 
     #[test]

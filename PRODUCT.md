@@ -28,7 +28,7 @@ and do not compensate for the different latency of each Bluetooth device.
 | F2 | Stereo split | Per device channel mode: **Stereo**, **Left only**, **Right only**, **Mono mix**. Two devices = one stereo pair. |
 | F3 | Per-device sync delay | 0–500 ms slider, 1 ms steps, plus fine ±1 ms nudge buttons. |
 | F4 | Per-device volume | 0–100 %, independent of the Windows master volume. |
-| F5 | One-click Start/Stop | Global toggle; also from the tray and a global hotkey. |
+| F5 | One-click play/stop | "Play on multiple devices" / "Stop playing" button; also from the tray. |
 | F6 | Hot-plug | Device removal does not stop others; reconnect resumes automatically. |
 | F7 | Tray mode | Keeps streaming when the window is closed; tray menu for start/stop/quit. |
 | F8 | Profiles | Remember device set, channel mode, delay and volume per device ID. |
@@ -54,9 +54,10 @@ and do not compensate for the different latency of each Bluetooth device.
 ## UX
 
 - Native Windows 11 Fluent look, **dark mode** (follow system theme later), Mica backdrop.
-- Single window: list of device cards (name, type icon, connected state, channel mode,
-  delay slider, volume slider, enable toggle), big Start/Stop button, status bar with
-  buffer health.
+- One window with a navigation rail: **Devices** (a card per device with name, type icon,
+  sync status, on/off switch, channels, delay slider and volume slider), **Sync** (when each
+  device plays, measure with the microphone, sync by ear) and **Settings** (playback
+  options, About). An info bar shows Active/Off and what is playing.
 - Keyboard-first and accessible: full tab order, arrow keys on sliders, screen-reader names.
 
 ## Architecture
@@ -109,8 +110,8 @@ XAML bindings).
 
 Used under the **Slint Royalty-free Desktop License 2.0** (free for desktop apps). Obligations:
 
-- Show the `AboutSlint` widget in the app's About dialog (reachable from the main menu/tray),
-  **or** show the Slint badge on the public download page. We do the About dialog.
+- Show the `AboutSlint` widget in the app's About section, **or** show the Slint badge on
+  the public download page. We show it under About on the Settings page.
 - Do not redistribute Slint on its own or expose Slint APIs from our app.
 - Keep Slint's licence notices intact.
 

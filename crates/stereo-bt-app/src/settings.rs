@@ -40,6 +40,8 @@ pub(crate) struct Settings {
     pub(crate) include_default: bool,
     /// Whether every device follows the Windows volume of the default device.
     pub(crate) follow_system_volume: bool,
+    /// Whether closing the window while playing keeps playing in the tray.
+    pub(crate) keep_streaming_on_close: bool,
     pub(crate) devices: Vec<DeviceSettings>,
 }
 
@@ -48,6 +50,7 @@ impl Default for Settings {
         Self {
             include_default: true,
             follow_system_volume: true,
+            keep_streaming_on_close: true,
             devices: Vec::new(),
         }
     }
@@ -186,6 +189,7 @@ mod tests {
         let settings: Settings = toml::from_str(old).unwrap();
 
         assert!(settings.follow_system_volume);
+        assert!(settings.keep_streaming_on_close);
         assert!(!settings.include_default);
     }
 

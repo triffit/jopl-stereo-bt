@@ -1,17 +1,40 @@
-// Custom-drawn controls in the accent style. Each one is keyboard operable
-// and exposes an accessible role, label and value to screen readers.
+// Windows 11 Fluent-style controls not covered by Slint's std widgets.
+// Each one is keyboard operable and exposes an accessible role, label and
+// value to screen readers.
 
 import { Theme } from "theme.slint";
 
-// Thin focus outline drawn around a focused control.
-component FocusRing inherits Rectangle {
-    in property <bool> shown;
-    border-radius: Theme.small-radius;
-    border-width: shown ? 2px : 0;
-    border-color: Theme.accent-light;
+// A Segoe Fluent Icons glyph.
+export component Icon inherits Text {
+    in property <string> glyph;
+    text: root.glyph;
+    font-family: Theme.icons;
+    font-size: 16px;
+    color: Theme.text-2;
+    vertical-alignment: center;
+    horizontal-alignment: center;
+    accessible-role: none;
 }
 
-export component AccentSlider inherits Rectangle {
+// A small status dot; tone 0 neutral, 1 good, 2 caution, 3 error.
+export component Dot inherits Rectangle {
+    in property <int> tone;
+    width: 6px;
+    height: 6px;
+    border-radius: 3px;
+    background: root.tone == 1 ? Theme.success : root.tone == 2 ? Theme.caution : root.tone == 3 ? Theme.error : Theme.text-3;
+}
+
+// A card surface.
+export component Card inherits Rectangle {
+    border-radius: Theme.radius;
+    background: Theme.layer;
+    border-width: 1px;
+    border-color: Theme.stroke;
+}
+
+// Horizontal slider with a Fluent thumb.
+export component Slider inherits Rectangle {
     in property <float> minimum: 0;
     in property <float> maximum: 100;
     // in-out: the user moves it; owners push external changes back in.
@@ -19,7 +42,7 @@ export component AccentSlider inherits Rectangle {
     in property <string> label;
     callback changed(float);
 
-    property <length> knob: 16px;
+    property <length> thumb: 20px;
     property <float> ratio: (root.value - root.minimum) / (root.maximum - root.minimum);
 
     function set(v: float) {
@@ -28,10 +51,11 @@ export component AccentSlider inherits Rectangle {
     }
 
     function set-from-x(x: length) {
-        root.set(root.minimum + (x - root.knob / 2) / (root.width - root.knob) * (root.maximum - root.minimum));
+        root.set(root.minimum + (x - root.thumb / 2) / (root.width - root.thumb) * (root.maximum - root.minimum));
     }
 
-    min-height: 24px;
+    min-height: 32px;
+    min-width: 80px;
     horizontal-stretch: 1;
     accessible-role: slider;
     accessible-label: root.label;
@@ -72,12 +96,12 @@ export component AccentSlider inherits Rectangle {
         }
 
         track := Rectangle {
-            x: root.knob / 2;
+            x: root.thumb / 2;
             y: (parent.height - 4px) / 2;
-            width: parent.width - root.knob;
+            width: parent.width - root.thumb;
             height: 4px;
             border-radius: 2px;
-            background: Theme.track;
+            background: Theme.text-3;
         }
 
         Rectangle {
@@ -90,14 +114,24 @@ export component AccentSlider inherits Rectangle {
         }
 
         Rectangle {
-            x: track.x + track.width * root.ratio - root.knob / 2;
-            y: (parent.height - root.knob) / 2;
-            width: root.knob;
-            height: root.knob;
-            border-radius: root.knob / 2;
-            background: #ffffff;
-            border-width: 3px;
-            border-color: focus.has-focus || touch.pressed ? Theme.accent-light : Theme.accent;
+            x: track.x + track.width * root.ratio - root.thumb / 2;
+            y: (parent.height - root.thumb) / 2;
+            width: root.thumb;
+            height: root.thumb;
+            border-radius: root.thumb / 2;
+            background: #454545;
+            border-width: 1px;
+            border-color: focus.has-focus ? Theme.text : #ffffff17;
+            Rectangle {
+                property <length> size: touch.pressed ? 10px : touch.has-hover ? 14px : 12px;
+                x: (parent.width - self.size) / 2;
+                y: (parent.height - self.size) / 2;
+                width: self.size;
+                height: self.size;
+                border-radius: self.size / 2;
+                background: Theme.accent;
+                animate size { duration: 80ms; }
+            }
         }
 
         touch := TouchArea {
@@ -117,35 +151,21 @@ export component AccentSlider inherits Rectangle {
     }
 }
 
-export component AccentCheckBox inherits Rectangle {
+// Windows toggle switch with an optional visible text to its left.
+export component ToggleSwitch inherits Rectangle {
     in property <bool> checked;
-    in property <string> label;
+    in property <string> text;
+    // Accessible name; defaults to the visible text.
+    in property <string> label: root.text;
     callback toggled(bool);
 
-    width: 22px;
-    height: 22px;
+    min-height: 32px;
+    horizontal-stretch: 0;
     accessible-role: checkbox;
     accessible-label: root.label;
     accessible-checkable: true;
     accessible-checked: root.checked;
     accessible-action-default => { root.toggled(!root.checked); }
-
-    box := Rectangle {
-        border-radius: 5px;
-        background: root.checked ? Theme.accent : transparent;
-        border-width: root.checked ? 0 : 2px;
-        border-color: touch.has-hover ? Theme.accent-light : Theme.text-muted;
-    }
-
-    if root.checked: Path {
-        width: 100%;
-        height: 100%;
-        viewbox-width: 22;
-        viewbox-height: 22;
-        commands: "M 5.5 11.5 L 9.5 15.5 L 16.5 7.5";
-        stroke: #ffffff;
-        stroke-width: 2.5px;
-    }
 
     focus := FocusScope {
         key-pressed(event) => {
@@ -163,119 +183,64 @@ export component AccentCheckBox inherits Rectangle {
             }
         }
     }
-
-    FocusRing {
-        x: -3px;
-        y: -3px;
-        width: parent.width + 6px;
-        height: parent.height + 6px;
-        shown: focus.has-focus;
-    }
-}
-
-// Small rounded status label. kind: 0 info, 1 good, 2 neutral, 3 warning, 4 error.
-export component Pill inherits Rectangle {
-    in property <string> text;
-    in property <int> kind;
-    property <color> tint: kind == 0 ? Theme.info : kind == 1 ? Theme.accent-light : kind == 3 ? Theme.warning : kind == 4 ? Theme.error : #9aa0b8;
-
-    height: 24px;
-    border-radius: 7px;
-    background: root.tint.with-alpha(0.16);
-    horizontal-stretch: 0;
     HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        Text {
+        spacing: 12px;
+        alignment: end;
+        if root.text != "": Text {
             text: root.text;
-            color: root.tint;
-            font-size: 12px;
-            font-weight: 600;
+            color: Theme.text;
             vertical-alignment: center;
         }
-    }
-}
-
-// Choice between a few short options, e.g. the channel mode.
-export component Segmented inherits Rectangle {
-    in property <[string]> options;
-    in-out property <int> current;
-    in property <string> label;
-    callback selected(int);
-
-    height: 26px;
-    border-radius: Theme.small-radius;
-    background: Theme.track;
-    accessible-role: tab-list;
-    accessible-label: root.label;
-
-    focus := FocusScope {
-        key-pressed(event) => {
-            if (event.text == Key.RightArrow && root.current < root.options.length - 1) {
-                root.current += 1;
-                root.selected(root.current);
-                return accept;
-            }
-            if (event.text == Key.LeftArrow && root.current > 0) {
-                root.current -= 1;
-                root.selected(root.current);
-                return accept;
-            }
-            return reject;
-        }
-        HorizontalLayout {
-            padding: 2px;
-            spacing: 2px;
-            for option[index] in root.options: Rectangle {
-                horizontal-stretch: 1;
-                border-radius: Theme.small-radius - 2px;
-                background: index == root.current ? Theme.accent : segment-touch.has-hover ? Theme.border : transparent;
-                accessible-role: tab;
-                accessible-label: option;
-                accessible-item-selected: index == root.current;
-                accessible-action-default => {
-                    root.current = index;
-                    root.selected(index);
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 40px;
+                height: 20px;
+                border-radius: 10px;
+                background: root.checked ? (touch.has-hover ? Theme.accent-hover : Theme.accent) : (touch.has-hover ? Theme.control : transparent);
+                border-width: root.checked ? 0 : 1px;
+                border-color: Theme.text-2;
+                Rectangle {
+                    property <length> size: touch.pressed ? 14px : 12px;
+                    x: root.checked ? parent.width - self.size - 4px : 4px;
+                    y: (parent.height - self.size) / 2;
+                    width: self.size;
+                    height: self.size;
+                    border-radius: self.size / 2;
+                    background: root.checked ? #000000 : Theme.text-2;
+                    animate x { duration: 120ms; easing: ease-out; }
                 }
-                Text {
-                    text: option;
-                    font-size: 12px;
-                    color: index == root.current ? #ffffff : Theme.text-muted;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                segment-touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        focus.focus();
-                        root.current = index;
-                        root.selected(index);
-                    }
+                // Focus ring.
+                Rectangle {
+                    x: -3px;
+                    y: -3px;
+                    width: parent.width + 6px;
+                    height: parent.height + 6px;
+                    border-radius: 13px;
+                    border-width: focus.has-focus ? 2px : 0;
+                    border-color: Theme.text;
                 }
             }
         }
     }
-
-    FocusRing {
-        x: -3px;
-        y: -3px;
-        width: parent.width + 6px;
-        height: parent.height + 6px;
-        shown: focus.has-focus;
-    }
 }
 
-export component OutlineButton inherits Rectangle {
+// Button with an optional icon; `primary` uses the accent colour.
+export component CommandButton inherits Rectangle {
     in property <string> text;
+    in property <string> glyph;
+    in property <bool> primary;
     in property <bool> enabled: true;
+    in property <length> font-size: 14px;
     callback clicked();
 
-    height: 40px;
-    min-width: 120px;
-    border-radius: 8px;
-    background: touch.has-hover && root.enabled ? Theme.card-hover : Theme.card;
-    border-width: 1px;
-    border-color: focus.has-focus ? Theme.accent-light : Theme.border;
+    height: 32px;
+    border-radius: Theme.control-radius;
+    background: !root.enabled ? Theme.control
+        : root.primary ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : (touch.has-hover ? Theme.layer-hover : Theme.control);
+    border-width: focus.has-focus ? 2px : root.primary ? 0 : 1px;
+    border-color: focus.has-focus ? Theme.text : Theme.control-stroke;
     opacity: root.enabled ? 1 : 0.45;
     accessible-role: button;
     accessible-label: root.text;
@@ -305,30 +270,35 @@ export component OutlineButton inherits Rectangle {
         }
     }
     HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        alignment: center;
+        if root.glyph != "": Icon {
+            glyph: root.glyph;
+            font-size: 14px;
+            color: root.primary && root.enabled ? #000000 : Theme.text;
+        }
         Text {
             text: root.text;
-            color: Theme.text;
-            font-size: 14px;
-            horizontal-alignment: center;
+            font-size: root.font-size;
+            color: root.primary && root.enabled ? #000000 : Theme.text;
             vertical-alignment: center;
         }
     }
 }
 
-// Compact secondary action, e.g. "Make default" on a device card.
-export component SmallButton inherits Rectangle {
+// Borderless text button, e.g. "Make default" on a device card.
+export component SubtleButton inherits Rectangle {
     in property <string> text;
     in property <string> label: root.text;
     callback clicked();
 
-    height: 26px;
-    border-radius: Theme.small-radius;
-    background: touch.has-hover ? Theme.card-hover : transparent;
-    border-width: 1px;
-    border-color: focus.has-focus ? Theme.accent-light : Theme.border;
-    horizontal-stretch: 0;
+    height: 32px;
+    border-radius: Theme.control-radius;
+    background: touch.has-hover ? Theme.control : transparent;
+    border-width: focus.has-focus ? 2px : 0;
+    border-color: Theme.text;
     accessible-role: button;
     accessible-label: root.label;
     accessible-action-default => { root.clicked(); }
@@ -350,34 +320,167 @@ export component SmallButton inherits Rectangle {
         }
     }
     HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
+        padding-left: 12px;
+        padding-right: 12px;
         Text {
             text: root.text;
-            color: Theme.text-muted;
-            font-size: 12px;
+            color: Theme.text;
             vertical-alignment: center;
         }
     }
 }
 
-export component GradientButton inherits Rectangle {
+// A choice between a few short options, e.g. the channels.
+export component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> current;
+    in property <string> label;
+    callback selected(int);
+
+    height: 32px;
+    border-radius: Theme.control-radius;
+    background: Theme.control;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Theme.text : Theme.control-stroke;
+    accessible-role: tab-list;
+    accessible-label: root.label;
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.RightArrow && root.current < root.options.length - 1) {
+                root.current += 1;
+                root.selected(root.current);
+                return accept;
+            }
+            if (event.text == Key.LeftArrow && root.current > 0) {
+                root.current -= 1;
+                root.selected(root.current);
+                return accept;
+            }
+            return reject;
+        }
+        HorizontalLayout {
+            padding: 1px;
+            for option[index] in root.options: Rectangle {
+                horizontal-stretch: 1;
+                min-width: 60px;
+                background: index == root.current ? #ffffff17 : segment-touch.has-hover ? #ffffff0a : transparent;
+                accessible-role: tab;
+                accessible-label: option;
+                accessible-item-selected: index == root.current;
+                accessible-action-default => {
+                    root.current = index;
+                    root.selected(index);
+                }
+                if index > 0: Rectangle {
+                    x: 0;
+                    width: 1px;
+                    background: Theme.control-stroke;
+                }
+                Text {
+                    text: option;
+                    color: Theme.text;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                if index == root.current: Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: parent.height - 5px;
+                    width: 16px;
+                    height: 3px;
+                    border-radius: 1.5px;
+                    background: Theme.accent;
+                }
+                segment-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        focus.focus();
+                        root.current = index;
+                        root.selected(index);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// InfoBar; tone 0 neutral, 1 success, 2 caution, 3 error. Children are
+// placed at the right end (e.g. an action button).
+export component InfoBar inherits Rectangle {
+    in property <int> tone;
+    in property <string> title;
+    in property <string> message;
+
+    border-radius: Theme.control-radius;
+    background: root.tone == 1 ? Theme.info-success : root.tone == 2 ? Theme.info-caution : root.tone == 3 ? Theme.info-error : Theme.layer;
+    border-width: 1px;
+    border-color: Theme.stroke;
+    accessible-role: text;
+    accessible-label: root.title + ": " + root.message;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 8px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 12px;
+        min-height: 48px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                background: root.tone == 1 ? Theme.success : root.tone == 2 ? Theme.caution : root.tone == 3 ? Theme.error : Theme.text-3;
+                Icon {
+                    glyph: root.tone == 1 ? "\u{E73E}" : root.tone == 0 ? "\u{E946}" : "\u{E7BA}";
+                    font-size: 10px;
+                    color: #000000;
+                }
+            }
+        }
+        if root.title != "": Text {
+            text: root.title;
+            font-weight: 600;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.message;
+            color: Theme.text;
+            vertical-alignment: center;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+        @children
+    }
+}
+
+// A navigation rail item; `badge` shows a yellow attention dot.
+export component NavItem inherits Rectangle {
+    in property <string> glyph;
     in property <string> text;
+    in property <bool> selected;
+    in property <bool> badge;
     callback clicked();
 
-    height: 58px;
-    border-radius: Theme.radius;
-    background: Theme.gradient;
-    accessible-role: button;
-    accessible-label: root.text;
+    height: 36px;
+    border-radius: Theme.control-radius;
+    background: root.selected ? Theme.layer : touch.has-hover ? Theme.control : transparent;
+    border-width: focus.has-focus ? 2px : 0;
+    border-color: Theme.text;
+    accessible-role: tab;
+    accessible-label: root.badge ? root.text + ", needs attention" : root.text;
+    accessible-item-selected: root.selected;
     accessible-action-default => { root.clicked(); }
 
-    // Hover and press feedback without changing the gradient itself.
-    Rectangle {
-        border-radius: Theme.radius;
-        background: touch.pressed ? #00000033 : touch.has-hover ? #ffffff14 : transparent;
-        border-width: focus.has-focus ? 2px : 0;
-        border-color: #ffffffaa;
+    if root.selected: Rectangle {
+        x: 0;
+        y: 10px;
+        width: 3px;
+        height: parent.height - 20px;
+        border-radius: 1.5px;
+        background: Theme.accent;
     }
     focus := FocusScope {
         key-pressed(event) => {
@@ -389,18 +492,33 @@ export component GradientButton inherits Rectangle {
         }
         touch := TouchArea {
             mouse-cursor: pointer;
-            clicked => {
-                focus.focus();
-                root.clicked();
-            }
+            // No focus on click: the ring is for keyboard users.
+            clicked => { root.clicked(); }
         }
     }
-    Text {
-        text: root.text;
-        color: #ffffff;
-        font-size: 17px;
-        font-weight: 700;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 14px;
+        Icon {
+            glyph: root.glyph;
+            color: Theme.text;
+            width: 16px;
+        }
+        Text {
+            text: root.text;
+            color: Theme.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        if root.badge: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: Theme.caution;
+            }
+        }
     }
 }
