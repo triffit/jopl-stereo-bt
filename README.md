@@ -18,8 +18,7 @@ whole set a wider stereo image and reverb. No virtual audio driver needed.
   identical speakers apart, a tray icon, and the Windows 11 look with your accent colour.
 
 Windows 11, portable: a single `jopl-stereo-bt.exe`, no installer. MIT licence, see
-[LICENSE](LICENSE). Product description: [PRODUCT.md](PRODUCT.md). Inspired by
-[WaveSync](https://indalsingh.dev/wavesync).
+[LICENSE](LICENSE). Product description: [PRODUCT.md](PRODUCT.md).
 
 ## Build
 
