@@ -40,6 +40,7 @@ and do not compensate for the different latency of each Bluetooth device.
 | F14 | Measure with mic | Plays sweeps on one device at a time, finds them in a RAW microphone recording, and recommends the default device (the slowest by itself) and delays; verified within ~1 ms on hardware. |
 | F15 | Small-speaker sound | Per device: bass cut (24 dB/oct high-pass, off or 40–300 Hz), virtual bass (harmonics of the cut bass), a speaker volume limit while following the system volume, and an always-on limiter at full scale. No added latency. |
 | F16 | Space | For every device played through the app: stereo width (mid/side, 0–200 %) and a Freeverb-style room reverb (amount, room size) with different left and right tails, so a speaker pair sounds further apart. No added latency. |
+| F17 | Battery level | Each device card shows the battery level Windows knows for it (Bluetooth devices that report one, usually via the hands-free profile), refreshed every minute; amber below 15 %. |
 
 ## Later (v2+)
 

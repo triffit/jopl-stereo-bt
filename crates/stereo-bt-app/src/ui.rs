@@ -449,6 +449,19 @@ fn to_ui_row(row: &DeviceRow, heading: &str) -> generated::DeviceRow {
         checked: row.checked,
         can_make_default: row.can_make_default,
         worn: view_model::looks_worn(&row.name),
+        battery: row
+            .battery_percent
+            .map(|level| format!("{level} %"))
+            .unwrap_or_default()
+            .into(),
+        battery_glyph: row
+            .battery_percent
+            .map(|level| view_model::battery_glyph(level).to_string())
+            .unwrap_or_default()
+            .into(),
+        battery_low: row
+            .battery_percent
+            .is_some_and(|level| level < view_model::LOW_BATTERY_PERCENT),
         heading: heading.into(),
         status: row.status.as_str().into(),
         tone: match row.tone {

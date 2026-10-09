@@ -11,6 +11,8 @@ use crate::{
 
 /// How often the default device's volume mixer is checked for muted apps.
 const MUTED_APP_CHECK: Duration = Duration::from_secs(1);
+/// How often battery levels are read; they change slowly.
+const BATTERY_CHECK: Duration = Duration::from_secs(60);
 
 /// Volumes at or above this slider position count as full.
 /// Device volumes this close (as Windows scalars) count as equal.
@@ -66,6 +68,8 @@ pub struct EngineStatus {
     /// Apps playing on the default device while muted for it in the Windows
     /// volume mixer: their audio reaches no device at all.
     pub muted_apps: Vec<MutedApp>,
+    /// Battery level in percent of devices that report one (also while stopped).
+    pub batteries: Vec<(DeviceId, u8)>,
 }
 
 struct ActiveSession<B: Backend> {
@@ -117,6 +121,8 @@ pub struct Supervisor<P: Platform, J: RestoreJournal> {
     isolated: Option<DeviceId>,
     muted_apps: Vec<MutedApp>,
     muted_apps_checked: Option<Instant>,
+    batteries: Vec<(DeviceId, u8)>,
+    batteries_checked: Option<Instant>,
 }
 
 impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
@@ -146,6 +152,8 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
             isolated: None,
             muted_apps: Vec::new(),
             muted_apps_checked: None,
+            batteries: Vec::new(),
+            batteries_checked: None,
         };
         supervisor.reconcile()?;
         Ok(supervisor)
@@ -243,6 +251,14 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
             .map(|d| d.id.clone())
     }
 
+    /// Re-reads battery levels; a failed query keeps the last known levels.
+    fn refresh_batteries(&mut self) {
+        let known: Vec<DeviceId> = self.devices.iter().map(|d| d.id.clone()).collect();
+        if let Ok(levels) = self.platform.battery_levels(&known) {
+            self.batteries = levels;
+        }
+    }
+
     /// Re-reads which apps are muted on the default device (also while stopped).
     fn refresh_muted_apps(&mut self) {
         self.muted_apps = self
@@ -291,6 +307,13 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
         {
             self.muted_apps_checked = Some(now);
             self.refresh_muted_apps();
+        }
+        if self
+            .batteries_checked
+            .is_none_or(|at| now.duration_since(at) >= BATTERY_CHECK)
+        {
+            self.batteries_checked = Some(now);
+            self.refresh_batteries();
         }
         let Some(active) = self.active.as_mut() else {
             return Ok(());
@@ -378,6 +401,7 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
                 .unwrap_or_default(),
             isolated: self.isolated.clone(),
             muted_apps: self.muted_apps.clone(),
+            batteries: self.batteries.clone(),
         }
     }
 
@@ -913,6 +937,29 @@ mod tests {
         s.maintain(Instant::now()).unwrap();
 
         assert_eq!(s.status().muted_apps, vec![chrome()]);
+    }
+
+    #[test]
+    fn f17_battery_levels_are_read_every_minute_also_while_stopped() {
+        let w = world("A", &["A", "B"]);
+        lock(&w).batteries.push((id("B"), 40));
+        lock(&w).batteries.push((id("Z"), 90));
+        let (mut s, _) = supervisor(&w, &[]);
+        let start = Instant::now();
+
+        s.maintain(start).unwrap();
+        assert_eq!(
+            s.status().batteries,
+            vec![(id("B"), 40)],
+            "unknown Z left out"
+        );
+
+        lock(&w).batteries[0].1 = 39;
+        s.maintain(start + Duration::from_secs(30)).unwrap();
+        assert_eq!(s.status().batteries, vec![(id("B"), 40)], "not re-read yet");
+
+        s.maintain(start + BATTERY_CHECK).unwrap();
+        assert_eq!(s.status().batteries, vec![(id("B"), 39)]);
     }
 
     #[test]

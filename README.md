@@ -35,6 +35,13 @@ The exe is `target/release/jopl-stereo-bt.exe`.
 6. **Settings**: keep the default device playing, follow the system volume, keep playing
    when the window is closed.
 
+### Battery levels
+
+Device cards show the battery level Windows knows for a Bluetooth device (the same as in
+Settings → Bluetooth & devices), refreshed every minute. Not every device reports one, and
+the level arrives through the hands-free (call) profile: with **Handsfree Telephony**
+disabled for a device, Windows no longer receives it.
+
 ## Troubleshooting
 
 ### `0x8889000F`: a second Bluetooth device does not play

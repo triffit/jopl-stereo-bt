@@ -131,6 +131,10 @@ impl Platform for WasapiPlatform {
         muted_apps(id)
     }
 
+    fn battery_levels(&self, known: &[DeviceId]) -> Result<Vec<(DeviceId, u8)>, Error> {
+        stereo_bt_wasapi::battery_levels(known)
+    }
+
     fn unmute_app(&self, id: &DeviceId, pid: u32) -> Result<(), Error> {
         unmute_app(id, pid)
     }

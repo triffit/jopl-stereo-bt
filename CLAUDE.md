@@ -139,6 +139,14 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - WASAPI loopback is captured **before** endpoint volume/mute (verified on hardware
   2026-10-08), so muting the default endpoint keeps the source audio.
 
+## Battery levels (F17)
+
+- `stereo_bt_wasapi::battery_levels` (WinRT, no `unsafe`): PnP devices with the Bluetooth
+  battery property `{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2` (AQS cannot filter on it, so
+  all devices are listed, ~40 ms), matched to audio endpoints via `System.Devices.ContainerId`.
+  The level comes through the hands-free profile: disabling Handsfree Telephony hides it.
+- `Supervisor::maintain` reads it every 60 s (also while stopped) into `EngineStatus::batteries`.
+
 ## WASAPI notes
 
 - Known WASAPI codes get a user explanation in `stereo-bt-wasapi/src/error.rs` (`explain`).

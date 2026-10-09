@@ -139,6 +139,8 @@ pub(crate) struct World {
     pub(crate) volumes: HashMap<DeviceId, SystemVolume>,
     /// Apps muted in the volume mixer, per device.
     pub(crate) muted_apps: Vec<(DeviceId, MutedApp)>,
+    /// Battery levels of devices that report one.
+    pub(crate) batteries: Vec<(DeviceId, u8)>,
 }
 
 /// A world shared between the test and the platform (possibly on another thread).
@@ -225,6 +227,15 @@ impl Platform for FakePlatform {
             .iter()
             .filter(|(device, _)| device == id)
             .map(|(_, app)| app.clone())
+            .collect())
+    }
+
+    fn battery_levels(&self, known: &[DeviceId]) -> Result<Vec<(DeviceId, u8)>, FakeError> {
+        Ok(lock(&self.world)
+            .batteries
+            .iter()
+            .filter(|(id, _)| known.contains(id))
+            .cloned()
             .collect())
     }
 

@@ -4756,7 +4756,9 @@ dependencies = [
  "thiserror 2.0.21",
  "wasapi",
  "windows",
+ "windows-collections",
  "windows-core",
+ "windows-future",
 ]
 
 [[package]]

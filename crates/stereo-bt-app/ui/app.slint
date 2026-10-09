@@ -16,6 +16,10 @@ export struct DeviceRow {
     worn: bool,
     // Section title shown above this card; empty for none.
     heading: string,
+    // Battery level, e.g. "30 %", and its icon; empty when not reported.
+    battery: string,
+    battery-glyph: string,
+    battery-low: bool,
     status: string,
     // 0 neutral, 1 good, 2 caution, 3 error
     tone: int,
@@ -347,6 +351,20 @@ component DeviceCard inherits Card {
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
+                }
+            }
+            if device.battery != "": HorizontalLayout {
+                spacing: 6px;
+                accessible-role: text;
+                accessible-label: "Battery " + device.battery;
+                Icon {
+                    glyph: device.battery-glyph;
+                    color: device.battery-low ? Theme.caution : Theme.text-2;
+                }
+                Text {
+                    text: device.battery;
+                    color: device.battery-low ? Theme.caution : Theme.text-2;
+                    vertical-alignment: center;
                 }
             }
             if device.can-make-default: VerticalLayout {

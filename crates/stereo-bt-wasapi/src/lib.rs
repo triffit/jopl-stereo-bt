@@ -12,6 +12,7 @@
 #![cfg(windows)]
 
 mod app_sessions;
+mod battery;
 mod com;
 mod default_device;
 mod device_watcher;
@@ -25,6 +26,7 @@ mod render_stream;
 mod stream_format;
 
 pub use app_sessions::{muted_apps, unmute_app};
+pub use battery::battery_levels;
 pub use com::ComGuard;
 pub use default_device::set_default_output;
 pub use device_watcher::DeviceWatcher;

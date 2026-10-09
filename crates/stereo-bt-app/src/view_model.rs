@@ -77,6 +77,8 @@ pub(crate) struct DeviceRow {
     pub(crate) bass_cut_hz: u16,
     pub(crate) virtual_bass_percent: u8,
     pub(crate) max_volume_percent: u8,
+    /// Battery level in percent, for devices that report one.
+    pub(crate) battery_percent: Option<u8>,
 }
 
 /// One lane of the timing overview: when a device is heard.
@@ -171,6 +173,11 @@ fn row(
         bass_cut_hz: device.bass_cut.as_hz(),
         virtual_bass_percent: device.virtual_bass.as_percent(),
         max_volume_percent: device.max_volume.as_percent(),
+        battery_percent: status
+            .batteries
+            .iter()
+            .find(|(id, _)| id == &device.id)
+            .map(|&(_, level)| level),
     }
 }
 
@@ -300,6 +307,18 @@ pub(crate) fn timeline(lanes: &[Lane]) -> Timeline {
             .find(|l| l.is_source)
             .map_or(0.0, |l| l.plays_ms),
     }
+}
+
+/// Below this battery level a device is shown as running low.
+pub(crate) const LOW_BATTERY_PERCENT: u8 = 15;
+
+/// The Segoe Fluent Icons battery glyph for `level` percent (Battery0 to
+/// Battery9 in tens, Battery10 when full).
+pub(crate) fn battery_glyph(level: u8) -> char {
+    if level >= 100 {
+        return '\u{E83F}';
+    }
+    char::from_u32(0xE850 + u32::from(level / 10)).unwrap_or('\u{E850}')
 }
 
 /// Whether a device name suggests something worn (shown with a headphones icon).
@@ -438,6 +457,25 @@ mod tests {
                 },
             ],
         )
+    }
+
+    #[test]
+    fn f17_rows_show_the_battery_of_devices_that_report_one() {
+        let (settings, mut status) = setup(&["B"]);
+        status.batteries = vec![(id("B"), 30)];
+
+        let rows = device_rows(&settings, &status, None);
+
+        assert_eq!(rows[1].battery_percent, Some(30));
+        assert_eq!(rows[2].battery_percent, None);
+    }
+
+    #[test]
+    fn f17_battery_glyph_follows_the_level() {
+        assert_eq!(battery_glyph(0), '\u{E850}');
+        assert_eq!(battery_glyph(34), '\u{E853}');
+        assert_eq!(battery_glyph(95), '\u{E859}');
+        assert_eq!(battery_glyph(100), '\u{E83F}');
     }
 
     #[test]

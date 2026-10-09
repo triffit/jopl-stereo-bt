@@ -49,6 +49,13 @@ pub trait Platform {
     /// Returns an error when the device cannot be queried.
     fn muted_apps(&self, id: &DeviceId) -> Result<Vec<MutedApp>, Self::Error>;
 
+    /// Battery level in percent of each device in `known` that reports one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when devices cannot be queried.
+    fn battery_levels(&self, known: &[DeviceId]) -> Result<Vec<(DeviceId, u8)>, Self::Error>;
+
     /// Unmutes process `pid` on device `id` in the volume mixer.
     ///
     /// # Errors

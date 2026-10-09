@@ -16,6 +16,8 @@ thiserror.workspace = true
 wasapi.workspace = true
 windows.workspace = true
 windows-core.workspace = true
+windows-collections.workspace = true
+windows-future.workspace = true
 
 [lints]
 workspace = true
