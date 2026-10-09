@@ -43,8 +43,10 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - Exe icon + version info: `build.rs` draws the icon with `src/icon.rs` (shared with the tray),
   encodes it with `src/ico.rs` into `OUT_DIR/app.ico` and embeds it via `winresource`.
 - Window chrome: `ui::select_backend` uses Slint's `unstable-winit-030` hook (Slint pinned
-  `~1.18` because of it) for a dark title bar and the Mica backdrop; `Theme.window`
-  is slightly translucent. No installer: the exe is portable.
+  `~1.18` because of it) for dark mode and the Mica backdrop. `Theme.window` is transparent
+  so Mica shows everywhere, like Windows Settings; the title bar follows the user's Windows
+  setting. `Theme.accent` is the user's Windows accent (`accent.rs`, WinRT `UISettings`
+  AccentLight2), set from Rust at start-up. No installer: the exe is portable.
 
 ## Slint notes
 
