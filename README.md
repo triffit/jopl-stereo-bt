@@ -60,8 +60,8 @@ Settings are saved per device in `%APPDATA%\JOPL-StereoBT\settings.toml`.
 ### Ping and level meters
 
 While playing, each device card shows a level meter, and the **Ping** button (the speaker
-icon next to the device name) plays a
-short double beep on that device only, handy to tell two identical speakers apart.
+icon next to the device name) plays a short double beep on that device only, handy to tell
+two identical speakers apart.
 
 ### Battery levels
 
