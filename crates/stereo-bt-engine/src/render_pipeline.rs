@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use rtrb::Consumer;
-use stereo_bt_core::{DriftControl, DriftResampler, Frame, OutputChain, Playout, SampleRate};
+use stereo_bt_core::{
+    DriftControl, DriftResampler, Frame, OutputChain, PeakMeter, Playout, SampleRate,
+};
 
 use crate::output_controls::OutputControls;
 
@@ -18,6 +20,9 @@ pub(crate) struct RenderPipeline {
     /// Scratch for the queue frames one cycle consumes.
     input: Vec<Frame>,
     chain: OutputChain,
+    meter: PeakMeter,
+    /// The ping request count already played.
+    pings_seen: u32,
     controls: Arc<OutputControls>,
 }
 
@@ -40,6 +45,8 @@ impl RenderPipeline {
             resampler: DriftResampler::new(),
             input: vec![Frame::SILENCE; max_input],
             chain: OutputChain::new(sample_rate),
+            meter: PeakMeter::new(sample_rate),
+            pings_seen: 0,
             controls,
         }
     }
@@ -72,6 +79,7 @@ impl RenderPipeline {
 
         self.resampler.process(input, ratio, out);
         self.chain.process(out);
+        self.controls.set_level(self.meter.process(out));
         self.controls
             .record_playout(self.playout.underruns(), self.playout.trims());
     }
@@ -83,6 +91,11 @@ impl RenderPipeline {
         self.chain.set_bass_cut(self.controls.bass_cut());
         self.chain.set_virtual_bass(self.controls.virtual_bass());
         self.chain.set_space(self.controls.space());
+        let pings = self.controls.ping_requests();
+        if pings != self.pings_seen {
+            self.pings_seen = pings;
+            self.chain.ping();
+        }
         self.chain.set_master_gain(self.controls.master_gain());
     }
 }
@@ -153,6 +166,34 @@ mod tests {
                 "{a:?} != {e:?}"
             );
         }
+    }
+
+    #[test]
+    fn f18_a_ping_request_is_played_once() {
+        let (_producer, mut pipeline, controls) = pipeline();
+        controls.request_ping();
+
+        let first = play(&mut pipeline, 1, 2_400);
+        let later = play(&mut pipeline, 20, 2_400);
+
+        assert!(
+            first.iter().any(|f| f.left.abs() > 0.2),
+            "ping heard while priming"
+        );
+        assert!(
+            later[16_000..].iter().all(|f| *f == Frame::SILENCE),
+            "played once"
+        );
+    }
+
+    #[test]
+    fn f19_the_played_level_is_published() {
+        let (mut producer, mut pipeline, controls) = pipeline();
+        producer.push_entire_slice(&ramp(1, 8)).unwrap();
+
+        play(&mut pipeline, 2, 4);
+
+        assert!(controls.level() > 0.2, "{}", controls.level());
     }
 
     #[test]

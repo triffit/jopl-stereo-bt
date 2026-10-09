@@ -1,6 +1,6 @@
 use crate::{
-    BassCut, BassShaper, ChannelMode, Delay, DelayLine, Frame, Limiter, Reverb, SampleRate, Space,
-    StereoWidener, VirtualBass, Volume,
+    BassCut, BassShaper, ChannelMode, Delay, DelayLine, Frame, Limiter, Ping, Reverb, SampleRate,
+    Space, StereoWidener, VirtualBass, Volume,
 };
 
 /// The per-device processing chain: delay, space (stereo width, reverb),
@@ -20,6 +20,7 @@ pub struct OutputChain {
     widener: StereoWidener,
     reverb: Reverb,
     bass: BassShaper,
+    ping: Ping,
     limiter: Limiter,
     volume_gain: f32,
     master_gain: f32,
@@ -37,6 +38,7 @@ impl OutputChain {
             widener: StereoWidener::default(),
             reverb: Reverb::new(sample_rate),
             bass: BassShaper::new(sample_rate),
+            ping: Ping::new(sample_rate),
             limiter: Limiter::new(sample_rate),
             volume_gain: Volume::default().gain(),
             master_gain: 1.0,
@@ -52,6 +54,12 @@ impl OutputChain {
     /// Sets which part of the stereo signal this device plays.
     pub fn set_channel_mode(&mut self, mode: ChannelMode) {
         self.channel_mode = mode;
+    }
+
+    /// Plays a short double beep on this device, on top of the audio and
+    /// regardless of its volume, so the user can tell which speaker it is.
+    pub fn ping(&mut self) {
+        self.ping.start();
     }
 
     /// Sets the stereo width and reverb.
@@ -98,7 +106,8 @@ impl OutputChain {
                 .reverb
                 .process_frame(self.widener.process_frame(delayed));
             let shaped = self.bass.process_frame(self.channel_mode.apply(spacious));
-            *frame = self.limiter.process_frame(shaped.scaled(gain));
+            let pinged = self.ping.process_frame(shaped.scaled(gain));
+            *frame = self.limiter.process_frame(pinged);
         }
         if !frames.is_empty() {
             self.current_gain = target;
@@ -150,6 +159,18 @@ mod tests {
 
         assert!((l[0].left - 0.8).abs() < 1e-6, "{l:?}");
         assert!(r[0].left.abs() < 1e-6, "{r:?}");
+    }
+
+    #[test]
+    fn f18_ping_sounds_even_at_zero_volume() {
+        let mut chain = OutputChain::new(SampleRate::HZ_48000);
+        chain.set_volume(Volume::from_percent(0).unwrap());
+        chain.ping();
+        let mut frames = vec![Frame::new(0.5, 0.5); 4_800];
+
+        chain.process(&mut frames);
+
+        assert!(frames.iter().any(|f| f.left.abs() > 0.2));
     }
 
     #[test]

@@ -234,6 +234,19 @@ impl Engine {
         self.request(|reply| Command::UnmuteApp(pid, reply))
     }
 
+    /// Plays a short double beep on `id` if it is playing, so the user can
+    /// tell which speaker it is (F18).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] when the engine thread is gone.
+    pub fn ping(&self, id: &DeviceId) -> Result<(), EngineError> {
+        self.client
+            .commands
+            .send(Command::Ping(id.clone()))
+            .map_err(|_| EngineError::Stopped)
+    }
+
     /// Starts measuring every playing device with the microphone in the
     /// background (see [`Engine::calibration`] for progress and the result).
     /// Plays test chirps and may change the default device.

@@ -21,6 +21,10 @@ pub(crate) struct OutputControls {
     width_percent: AtomicU8,
     reverb_percent: AtomicU8,
     room_percent: AtomicU8,
+    /// Incremented for every ping request; the render thread plays one per change.
+    ping_requests: AtomicU32,
+    /// Current peak level of the played audio, as `f32` bits.
+    level: AtomicU32,
     state: StateCell,
     underruns: AtomicU64,
     trims: AtomicU64,
@@ -45,6 +49,8 @@ impl OutputControls {
             width_percent: AtomicU8::new(Space::default().width.as_percent()),
             reverb_percent: AtomicU8::new(Space::default().reverb.get()),
             room_percent: AtomicU8::new(Space::default().room_size.get()),
+            ping_requests: AtomicU32::new(0),
+            level: AtomicU32::new(0.0_f32.to_bits()),
             state: StateCell::new(),
             underruns: AtomicU64::new(0),
             trims: AtomicU64::new(0),
@@ -122,6 +128,23 @@ impl OutputControls {
             .store(space.reverb.get(), Ordering::Relaxed);
         self.room_percent
             .store(space.room_size.get(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn request_ping(&self) {
+        self.ping_requests.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn ping_requests(&self) -> u32 {
+        self.ping_requests.load(Ordering::Relaxed)
+    }
+
+    /// The peak level of the played audio (linear).
+    pub(crate) fn level(&self) -> f32 {
+        f32::from_bits(self.level.load(Ordering::Relaxed))
+    }
+
+    pub(crate) fn set_level(&self, level: f32) {
+        self.level.store(level.to_bits(), Ordering::Relaxed);
     }
 
     pub(crate) fn state(&self) -> StreamState {

@@ -35,6 +35,11 @@ The exe is `target/release/jopl-stereo-bt.exe`.
 6. **Settings**: keep the default device playing, follow the system volume, keep playing
    when the window is closed.
 
+### Ping and level meters
+
+While playing, each device card shows a level meter and a **Ping** button: Ping plays a
+short double beep on that device only, handy to tell two identical speakers apart.
+
 ### Battery levels
 
 Device cards show the battery level Windows knows for a Bluetooth device (the same as in

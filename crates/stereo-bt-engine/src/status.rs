@@ -28,4 +28,6 @@ pub struct OutputStatus {
     pub trims: u64,
     /// Why the stream failed, when `state` is [`StreamState::Failed`].
     pub error: Option<String>,
+    /// How loud it plays right now, as a meter fill in percent (-60 to 0 dB).
+    pub level_percent: u8,
 }

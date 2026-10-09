@@ -29,6 +29,7 @@ pub(crate) trait EngineControl {
     fn set_click_track(&self, on: bool) -> Result<(), String>;
     fn isolate(&self, device: Option<DeviceId>) -> Result<(), String>;
     fn unmute_app(&self, pid: u32) -> Result<(), String>;
+    fn ping(&self, id: &DeviceId) -> Result<(), String>;
     fn start_calibration(&self, request: CalibrationRequest) -> Result<(), String>;
     fn calibration(&self) -> CalibrationState;
     fn cancel_calibration(&self);
@@ -63,6 +64,10 @@ impl EngineControl for Engine {
 
     fn unmute_app(&self, pid: u32) -> Result<(), String> {
         Engine::unmute_app(self, pid).map_err(|e| e.to_string())
+    }
+
+    fn ping(&self, id: &DeviceId) -> Result<(), String> {
+        Engine::ping(self, id).map_err(|e| e.to_string())
     }
 
     fn start_calibration(&self, request: CalibrationRequest) -> Result<(), String> {
@@ -149,6 +154,8 @@ pub(crate) struct View {
     pub(crate) system_volume_percent: Option<u8>,
     pub(crate) space: Space,
     pub(crate) rows: Vec<DeviceRow>,
+    /// Level meter fill per row; `None` while a device is not playing.
+    pub(crate) levels: Vec<Option<u8>>,
     /// "Active" or "Off".
     pub(crate) status_word: &'static str,
     pub(crate) status_message: String,
@@ -388,6 +395,7 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
             system_volume_percent: self.status.system_volume_percent,
             space: self.settings.space,
             out_of_sync: view_model::out_of_sync(&rows),
+            levels: view_model::levels(&rows, &self.status),
             measured_with: (!lanes.is_empty())
                 .then(|| measurement.map(|m| m.microphone.clone()))
                 .flatten(),
@@ -548,6 +556,13 @@ impl<E: EngineControl, S: SettingsStore> Controller<E, S> {
             lines,
             advice,
             can_apply,
+        }
+    }
+
+    /// Plays a short double beep on a playing device, to tell which one it is (F18).
+    pub(crate) fn ping(&mut self, id: &DeviceId) {
+        if let Err(e) = self.engine.ping(id) {
+            self.error = Some(format!("Could not ping the device: {e}"));
         }
     }
 
@@ -772,6 +787,7 @@ mod tests {
         updated: Vec<EngineConfig>,
         stopped: usize,
         made_default: Vec<DeviceId>,
+        pinged: Vec<DeviceId>,
         calibration: CalibrationState,
         calibration_requests: Vec<CalibrationRequest>,
         click_track: bool,
@@ -819,6 +835,11 @@ mod tests {
 
         fn isolate(&self, device: Option<DeviceId>) -> Result<(), String> {
             self.0.borrow_mut().isolated.push(device);
+            Ok(())
+        }
+
+        fn ping(&self, id: &DeviceId) -> Result<(), String> {
+            self.0.borrow_mut().pinged.push(id.clone());
             Ok(())
         }
 
@@ -1010,6 +1031,7 @@ mod tests {
                 overruns: 0,
                 trims: 0,
                 error: None,
+                level_percent: 0,
             }];
             log.status.click_times = (0..60).map(|n| epoch + Duration::from_secs(n)).collect();
         }
@@ -1326,6 +1348,15 @@ mod tests {
         assert_eq!(space.reverb.get(), 30);
         assert_eq!(space.room_size.get(), 0);
         assert_eq!(c.view().space, space);
+    }
+
+    #[test]
+    fn f18_ping_reaches_the_engine() {
+        let (mut c, engine, _) = controller();
+
+        c.ping(&id("B"));
+
+        assert_eq!(engine.0.borrow().pinged, vec![id("B")]);
     }
 
     #[test]

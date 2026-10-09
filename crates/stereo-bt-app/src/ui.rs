@@ -52,15 +52,8 @@ where
     };
     window.on_toggle_running(bind.action(Controller::toggle_running));
     window.on_checked_changed(bind.device(|c, id, on: bool| c.set_enabled(id, on)));
-    window.on_make_default({
-        let bind = bind.clone();
-        move |raw_id| {
-            if let Ok(id) = DeviceId::new(raw_id.as_str()) {
-                bind.controller.borrow_mut().make_default(&id);
-                bind.refresh();
-            }
-        }
-    });
+    window.on_ping(bind.device_action(Controller::ping));
+    window.on_make_default(bind.device_action(Controller::make_default));
     window.on_measure_start(bind.action(Controller::start_measurement));
     window.on_measure_apply(bind.action(Controller::measurement_apply));
     window.on_measure_close(bind.action(Controller::measurement_close));
@@ -228,6 +221,20 @@ impl<E: EngineControl + 'static, S: SettingsStore + 'static> Binder<E, S> {
         }
     }
 
+    /// A callback naming a device; the identifier comes from the UI and is validated.
+    fn device_action(
+        &self,
+        apply: impl Fn(&mut Controller<E, S>, &DeviceId) + 'static,
+    ) -> impl Fn(SharedString) + 'static {
+        let bind = self.clone();
+        move |raw_id| {
+            if let Ok(id) = DeviceId::new(raw_id.as_str()) {
+                apply(&mut bind.controller.borrow_mut(), &id);
+                bind.refresh();
+            }
+        }
+    }
+
     /// A callback with one value, e.g. a slider.
     fn action_with<T>(
         &self,
@@ -275,6 +282,12 @@ impl<E: EngineControl + 'static, S: SettingsStore + 'static> Binder<E, S> {
 
 fn apply_view(window: &MainWindow, rows: &VecModel<generated::DeviceRow>, view: &View) {
     window.set_running(view.running);
+    let levels: Vec<i32> = view
+        .levels
+        .iter()
+        .map(|level| level.map_or(-1, i32::from))
+        .collect();
+    window.set_levels(ModelRc::new(VecModel::from(levels)));
     window.set_stereo_width(f32::from(view.space.width.as_percent()));
     window.set_reverb(f32::from(view.space.reverb.get()));
     window.set_room_size(f32::from(view.space.room_size.get()));

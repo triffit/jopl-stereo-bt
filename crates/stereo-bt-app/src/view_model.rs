@@ -309,6 +309,20 @@ pub(crate) fn timeline(lanes: &[Lane]) -> Timeline {
     }
 }
 
+/// The level meter fill (percent) of each row, in row order; `None` for
+/// devices that are not playing (those also cannot be pinged).
+pub(crate) fn levels(rows: &[DeviceRow], status: &EngineStatus) -> Vec<Option<u8>> {
+    rows.iter()
+        .map(|row| {
+            status
+                .outputs
+                .iter()
+                .find(|o| o.id == row.id && o.state == StreamState::Running)
+                .map(|o| o.level_percent)
+        })
+        .collect()
+}
+
 /// Below this battery level a device is shown as running low.
 pub(crate) const LOW_BATTERY_PERCENT: u8 = 15;
 
@@ -428,6 +442,7 @@ mod tests {
                 overruns: 0,
                 trims: 0,
                 error: (state == StreamState::Failed).then(|| "device unplugged".to_owned()),
+                level_percent: 0,
             })
             .collect();
     }
@@ -468,6 +483,23 @@ mod tests {
 
         assert_eq!(rows[1].battery_percent, Some(30));
         assert_eq!(rows[2].battery_percent, None);
+    }
+
+    #[test]
+    fn f19_levels_are_shown_for_playing_devices_only() {
+        let (settings, mut status) = setup(&["B", "C"]);
+        running(
+            &mut status,
+            &[
+                ("B", StreamState::Running, 0),
+                ("C", StreamState::Failed, 0),
+            ],
+        );
+        status.outputs[0].level_percent = 70;
+
+        let rows = device_rows(&settings, &status, None);
+
+        assert_eq!(levels(&rows, &status), vec![None, Some(70), None]);
     }
 
     #[test]

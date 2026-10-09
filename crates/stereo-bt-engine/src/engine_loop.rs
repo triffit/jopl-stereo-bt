@@ -24,6 +24,7 @@ pub(crate) enum Command {
     TestSignal(Option<TestSignal>, Sender<Result<(), SupervisorError>>),
     Isolate(Option<DeviceId>, Sender<Result<(), SupervisorError>>),
     UnmuteApp(u32, Sender<Result<(), SupervisorError>>),
+    Ping(DeviceId),
     Shutdown,
 }
 
@@ -67,6 +68,7 @@ pub(crate) fn run<P: Platform, J: RestoreJournal>(
             Ok(Command::UnmuteApp(pid, reply)) => {
                 let _ = reply.send(supervisor.unmute_app(pid));
             }
+            Ok(Command::Ping(id)) => supervisor.ping(&id),
             Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {}
         }

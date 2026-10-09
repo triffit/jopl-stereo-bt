@@ -268,6 +268,13 @@ impl<P: Platform, J: RestoreJournal> Supervisor<P, J> {
             .unwrap_or_default();
     }
 
+    /// Plays a short double beep on `id`, if it is playing (F18).
+    pub fn ping(&self, id: &DeviceId) {
+        if let Some(active) = &self.active {
+            let _ = active.session.ping(id);
+        }
+    }
+
     /// Makes `id` the Windows default device (the new audio source) and
     /// switches streaming over to it.
     ///

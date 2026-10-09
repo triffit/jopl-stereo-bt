@@ -139,6 +139,15 @@ Product proposal: see `PRODUCT.md`. Licence: MIT (`LICENSE`).
 - WASAPI loopback is captured **before** endpoint volume/mute (verified on hardware
   2026-10-08), so muting the default endpoint keeps the source audio.
 
+## Ping and level meters (F18, F19)
+
+- Ping: `Engine::ping` (fire-and-forget command) → `Session::ping` bumps a counter in
+  `OutputControls`; the render thread starts `OutputChain::ping` (`Ping`, 2 × 120 ms at
+  1.32 kHz) once per change. Mixed after the gain, before the limiter: audible at volume 0.
+- Level: `PeakMeter` on each rendered block → `OutputControls::level` → `OutputStatus::level_percent`
+  (`meter_fill`, -60..0 dB). The UI gets levels as a separate `[int]` model, not in
+  `DeviceRow`, so the 100 ms updates do not re-push slider values.
+
 ## Battery levels (F17)
 
 - `stereo_bt_wasapi::battery_levels` (WinRT, no `unsafe`): PnP devices with the Bluetooth

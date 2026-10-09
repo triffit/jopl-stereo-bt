@@ -302,6 +302,9 @@ component SpaceCard inherits Card {
 
 component DeviceCard inherits Card {
     in property <DeviceRow> device;
+    // Level meter fill in percent; negative hides the meter.
+    in property <int> level: -1;
+    callback ping();
     in property <bool> following;
     callback bass-cut-changed(float);
     callback virtual-bass-changed(float);
@@ -334,6 +337,21 @@ component DeviceCard inherits Card {
                     color: Theme.text;
                     overflow: elide;
                 }
+                if root.level >= 0: Rectangle {
+                    height: 4px;
+                    width: 160px;
+                    border-radius: 2px;
+                    background: Theme.control-stroke;
+                    accessible-role: progress-indicator;
+                    accessible-label: "Level of " + device.name;
+                    accessible-value: root.level + " %";
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * clamp(root.level, 0, 100) / 100;
+                        border-radius: 2px;
+                        background: root.level > 97 ? Theme.caution : Theme.accent;
+                    }
+                }
                 HorizontalLayout {
                     spacing: 6px;
                     VerticalLayout {
@@ -365,6 +383,15 @@ component DeviceCard inherits Card {
                     text: device.battery;
                     color: device.battery-low ? Theme.caution : Theme.text-2;
                     vertical-alignment: center;
+                }
+            }
+            // A level meter means the device is playing, so it can be pinged.
+            if root.level >= 0: VerticalLayout {
+                alignment: center;
+                SubtleButton {
+                    text: "Ping";
+                    label: "Ping " + device.name + ": play a short double beep on it";
+                    clicked => { root.ping(); }
                 }
             }
             if device.can-make-default: VerticalLayout {
@@ -742,6 +769,9 @@ export component MainWindow inherits Window {
     callback bass-cut-changed(string, float);
     callback virtual-bass-changed(string, float);
     callback max-volume-changed(string, float);
+    // Level meter fill per device row; negative while not playing.
+    in property <[int]> levels;
+    callback ping(string);
     in property <float> stereo-width: 100;
     in property <float> reverb;
     in property <float> room-size: 50;
@@ -872,7 +902,7 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 0: VerticalLayout {
                         spacing: 8px;
-                        for row in root.devices: VerticalLayout {
+                        for row[index] in root.devices: VerticalLayout {
                         spacing: 8px;
                         if row.heading != "": SectionTitle {
                             text: row.heading;
@@ -881,6 +911,8 @@ export component MainWindow inherits Window {
                         }
                         DeviceCard {
                             device: row;
+                            level: index < root.levels.length ? root.levels[index] : -1;
+                            ping => { root.ping(row.id); }
                             checked-changed(on) => { root.checked-changed(row.id, on); }
                             make-default => { root.make-default(row.id); }
                             mode-changed(mode) => { root.mode-changed(row.id, mode); }

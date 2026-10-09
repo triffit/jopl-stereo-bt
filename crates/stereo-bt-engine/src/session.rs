@@ -246,6 +246,7 @@ impl<B: Backend> Session<B> {
                 overruns: o.controls.overruns(),
                 trims: o.controls.trims(),
                 error: o.controls.error(),
+                level_percent: level_percent(o.controls.level()),
             })
             .collect()
     }
@@ -266,6 +267,12 @@ impl<B: Backend> Session<B> {
     #[must_use]
     pub fn set_channel_mode(&self, id: &DeviceId, mode: ChannelMode) -> bool {
         self.with_output(id, |c| c.set_channel_mode(mode))
+    }
+
+    /// Plays a short double beep on one output. Returns `false` for an unknown device.
+    #[must_use]
+    pub fn ping(&self, id: &DeviceId) -> bool {
+        self.with_output(id, OutputControls::request_ping)
     }
 
     /// Changes an output's bass cut live. Returns `false` for an unknown device.
@@ -395,4 +402,12 @@ fn render_thread<B: Backend>(
         render.write(block)?;
     }
     Ok(())
+}
+
+/// A linear peak level as a meter fill in whole percent.
+fn level_percent(level: f32) -> u8 {
+    // The fill is within 0.0..=1.0, so the result fits a u8.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let percent = (stereo_bt_core::meter_fill(level) * 100.0).round() as u8;
+    percent
 }
